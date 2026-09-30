@@ -123,7 +123,7 @@ pip install -r requirements.txt
 
 ## 🌐 Modos de Ejecución
 
-El archivo [`main.py`](file:///Users/diegos/Documents/GitHub/IA%20cam%20ip%20Dahua/main.py) incluye múltiples modos según el escenario de despliegue:
+El archivo [`main.py`](file:///Users/TU_USUARIO/Documents/GitHub/AI-Multi-Camera-Vision-PTZ-Tracker/main.py) incluye múltiples modos según el escenario de despliegue:
 
 ### 1. Modo Servidor Web Completo (Recomendado para Servidores)
 Inicia el backend FastAPI y permite monitorear y controlar desde el navegador:
