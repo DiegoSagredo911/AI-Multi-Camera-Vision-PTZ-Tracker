@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Multi-Camera Vision & PTZ Tracker</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        dark: {
+                            900: '#0b0f19',
+                            800: '#111827',
+                            700: '#1f2937',
+                            600: '#374151'
+                        },
+                        brand: {
+                            500: '#3b82f6',
+                            600: '#2563eb'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* Estilos para el D-Pad PTZ */
+        .dpad-btn {
+            transition: all 0.1s ease;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        .dpad-btn:active {
+            transform: scale(0.92);
+            background-color: #2563eb !important;
+            color: white !important;
+        }
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #111827;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #374151;
+            border-radius: 3px;
+        }
+        /* Drag and Drop styles */
+        .tour-row.dragging {
+            opacity: 0.4;
+            transform: scale(0.98);
+        }
+        .tour-row.drag-over {
+            border-top: 2px solid #3b82f6 !important;
+            background-color: #1e293b !important;
+        }
+        .drag-handle {
+            cursor: grab;
+        }
+        .drag-handle:active {
+            cursor: grabbing;
+        }
+    </style>
+</head>
+<body class="bg-dark-900 text-gray-100 font-sans min-h-screen flex flex-col antialiased selection:bg-brand-500 selection:text-white">
+
+    <!-- BARRA SUPERIOR (HEADER) -->
+    <header class="bg-dark-800/80 backdrop-blur border-b border-dark-700/60 sticky top-0 z-50 px-4 py-2.5">
+        <div class="max-w-7xl mx-auto flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="w-9 h-9 rounded-lg bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400">
+                    <i data-lucide="cctv" class="w-5 h-5"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-base tracking-wide flex items-center gap-2">
+                        AI Multi-Camera Vision & PTZ Tracker
+                    </h1>
+                    <p class="text-xs text-gray-400">Universal NVR In-Memory Server & Multi-Camera AI Hub</p>
+                </div>
+            </div>
+
+            <!-- Navegación de Pestañas -->
+            <nav class="flex items-center space-x-1 bg-dark-700/50 p-1 rounded-lg border border-dark-600/50 text-sm">
+                <button id="tabBtnMonitor" onclick="switchTab('monitor')" class="px-3.5 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 bg-blue-600 text-white shadow">
+                    <i data-lucide="layout-grid" class="w-4 h-4"></i> Monitoreo en Vivo
+                </button>
+                <button id="tabBtnConfig" onclick="switchTab('config')" class="px-3.5 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 text-gray-300 hover:text-white hover:bg-dark-600/50">
+                    <i data-lucide="sliders" class="w-4 h-4"></i> Configuración
+                </button>
+            </nav>
+
+            <div class="hidden sm:flex items-center space-x-4 text-xs text-gray-400">
+                <div class="flex items-center gap-1.5 bg-dark-700/40 px-2.5 py-1 rounded border border-dark-600/40">
+                    <i data-lucide="cpu" class="w-3.5 h-3.5 text-blue-400"></i>
+                    <span id="headerFps">FPS: --</span>
+                </div>
+                <div class="flex items-center gap-1.5 bg-dark-700/40 px-2.5 py-1 rounded border border-dark-600/40">
+                    <i data-lucide="users" class="w-3.5 h-3.5 text-emerald-400"></i>
+                    <span id="headerDetections">0 Objetivos</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- CONTENEDOR PRINCIPAL -->
+    <main class="max-w-7xl mx-auto p-4 flex-1 w-full">
+
+        <!-- ============================================================== -->
+        <!-- PESTAÑA 1: MONITOREO EN VIVO Y CONTROL PTZ -->
+        <!-- ============================================================== -->
+        <section id="tabContentMonitor" class="space-y-4">
+
+            <!-- Selector de Stream y Barra de Herramientas -->
+            <div class="flex flex-wrap items-center justify-between gap-3 bg-dark-800/60 p-2.5 rounded-xl border border-dark-700/60">
+                <div class="flex items-center space-x-2">
+                    <label for="streamSelector" class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Ver:</label>
+                    <select id="streamSelector" onchange="changeStream(this.value)" class="bg-dark-700 border border-dark-600 rounded-lg text-sm px-3 py-1.5 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="grid">Mosaico Completo (Multi-Cámara)</option>
+                        {% for cam in cameras %}
+                        <option value="{{ cam.id }}">{{ cam.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="flex items-center space-x-2">
+                    <button onclick="toggleFullscreen()" class="px-3 py-1.5 bg-dark-700 hover:bg-dark-600 border border-dark-600 rounded-lg text-xs font-medium flex items-center gap-1.5 transition">
+                        <i data-lucide="maximize" class="w-3.5 h-3.5"></i> Pantalla Completa
+                    </button>
+                    <button onclick="togglePatrol()" class="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 rounded-lg text-xs font-medium flex items-center gap-1.5 transition">
+                        <i data-lucide="rotate-cw" class="w-3.5 h-3.5"></i> Alternar Patrullaje
+                    </button>
+                    <button onclick="triggerCalibration()" class="px-3 py-1.5 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 rounded-lg text-xs font-medium flex items-center gap-1.5 transition">
+                        <i data-lucide="compass" class="w-3.5 h-3.5"></i> Calibrar Punto Cero (355°)
+                    </button>
+                </div>
+            </div>
+
+            <!-- Panel de Video + Controles Laterales -->
+            <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+
+                <!-- Visor de Video Principal (Columna de 3) -->
+                <div class="lg:col-span-3 bg-black rounded-xl overflow-hidden border border-dark-700/80 shadow-2xl relative flex items-center justify-center min-h-[380px] group">
+                    <img id="liveStream" src="/api/stream/grid" alt="Streaming en vivo" class="w-full h-auto object-contain max-h-[75vh]" />
+
+                    <!-- Indicador de Teclado activo -->
+                    <div class="absolute bottom-3 right-3 px-2 py-1 rounded bg-black/60 backdrop-blur border border-white/10 text-[10px] text-gray-400 pointer-events-none">
+                        Usa las flechas del teclado ◄ ▲ ▼ ► para mover el PTZ
+                    </div>
+                </div>
+
+                <!-- Panel Lateral: Controles PTZ y Detecciones (Columna de 1) -->
+                <div class="space-y-4">
+
+                    <!-- Mando PTZ (D-Pad Táctil) y Controles Modulares -->
+                    <div class="bg-dark-800/80 border border-dark-700/70 rounded-xl p-4 shadow">
+                        <div class="flex items-center justify-between mb-3 border-b border-dark-700/60 pb-2">
+                            <h2 class="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
+                                <i data-lucide="gamepad-2" class="w-4 h-4 text-blue-400"></i> Control Motorizado PTZ
+                            </h2>
+                            <span id="ptzStatusBadge" class="text-[10px] px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">IDLE</span>
+                        </div>
+
+                        <!-- MODOS MODULARES (Interruptores Rápidos) -->
+                        <div class="grid grid-cols-2 gap-2 mb-3">
+                            <button id="btnTrackingToggle" onclick="toggleTrackingModular()" class="px-2.5 py-1.5 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 transition bg-emerald-600/20 text-emerald-300 border-emerald-500/30">
+                                <i data-lucide="crosshair" class="w-3.5 h-3.5"></i> Seguimiento IA
+                            </button>
+                            <button id="btnPatrolToggle" onclick="togglePatrolModular()" class="px-2.5 py-1.5 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 transition bg-blue-600/20 text-blue-300 border-blue-500/30">
+                                <i data-lucide="scan" class="w-3.5 h-3.5"></i> Patrullaje
+                            </button>
+                        </div>
+
+                        <!-- D-PAD VIRTUAL -->
+                        <div class="flex flex-col items-center justify-center my-2">
+                            <!-- Arriba -->
+                            <button onmousedown="sendPTZ(0, 0.45)" onmouseup="stopPTZ()" ontouchstart="sendPTZ(0, 0.45)" ontouchend="stopPTZ()"
+                                    class="dpad-btn w-12 h-12 rounded-xl bg-dark-700 hover:bg-dark-600 border border-dark-600 flex items-center justify-center text-gray-200 shadow-md">
+                                <i data-lucide="chevron-up" class="w-6 h-6"></i>
+                            </button>
+
+                            <!-- Fila Central: Izquierda - Stop - Derecha -->
+                            <div class="flex items-center gap-2 my-2">
+                                <button onmousedown="sendPTZ(-0.45, 0)" onmouseup="stopPTZ()" ontouchstart="sendPTZ(-0.45, 0)" ontouchend="stopPTZ()"
+                                        class="dpad-btn w-12 h-12 rounded-xl bg-dark-700 hover:bg-dark-600 border border-dark-600 flex items-center justify-center text-gray-200 shadow-md">
+                                    <i data-lucide="chevron-left" class="w-6 h-6"></i>
+                                </button>
+                                <button onclick="stopPTZ()"
+                                        class="dpad-btn w-12 h-12 rounded-xl bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 flex items-center justify-center text-red-400 shadow-md" title="Detener inmediatamente">
+                                    <i data-lucide="square" class="w-5 h-5"></i>
+                                </button>
+                                <button onmousedown="sendPTZ(0.45, 0)" onmouseup="stopPTZ()" ontouchstart="sendPTZ(0.45, 0)" ontouchend="stopPTZ()"
+                                        class="dpad-btn w-12 h-12 rounded-xl bg-dark-700 hover:bg-dark-600 border border-dark-600 flex items-center justify-center text-gray-200 shadow-md">
+                                    <i data-lucide="chevron-right" class="w-6 h-6"></i>
+                                </button>
+                            </div>
+
+                            <!-- Abajo -->
+                            <button onmousedown="sendPTZ(0, -0.45)" onmouseup="stopPTZ()" ontouchstart="sendPTZ(0, -0.45)" ontouchend="stopPTZ()"
+                                    class="dpad-btn w-12 h-12 rounded-xl bg-dark-700 hover:bg-dark-600 border border-dark-600 flex items-center justify-center text-gray-200 shadow-md">
+                                <i data-lucide="chevron-down" class="w-6 h-6"></i>
+                            </button>
+                        </div>
+
+
+
+
+                        <!-- Velocidad de Control Manual -->
+                        <div class="mt-3 pt-2">
+                            <div class="flex justify-between text-xs text-gray-400 mb-1">
+                                <span>Velocidad Manual:</span>
+                                <span id="manualSpeedLabel" class="font-mono text-blue-400 font-bold">0.45</span>
+                            </div>
+                            <input id="manualSpeedSlider" type="range" min="0.1" max="0.9" step="0.05" value="0.45" oninput="updateManualSpeed(this.value)"
+                                   class="w-full h-1.5 bg-dark-700 rounded-lg appearance-none cursor-pointer accent-blue-500">
+                        </div>
+
+                        <!-- Telemetría de Coordenadas Nativas si la cámara las reporta -->
+                        <div id="nativeCoordsBox" class="mt-2.5 p-2 rounded bg-dark-900/60 border border-dark-700/50 text-[11px] text-gray-400 hidden flex items-center justify-between">
+                            <span>Posición Nativa:</span>
+                            <span id="nativeCoordsText" class="font-mono text-blue-300 font-medium">Pan: --, Tilt: --</span>
+                        </div>
+                    </div>
+
+
+                    <!-- Panel de Detecciones en Tiempo Real -->
+                    <div class="bg-dark-800/80 border border-dark-700/70 rounded-xl p-4 shadow flex flex-col max-h-[360px]">
+                        <div class="flex items-center justify-between mb-2 border-b border-dark-700/60 pb-2">
+                            <h2 class="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
+                                <i data-lucide="radar" class="w-4 h-4 text-emerald-400"></i> Detecciones IA
+                            </h2>
+                            <span id="activeDetectionsCount" class="text-xs font-mono font-bold text-emerald-400">0</span>
+                        </div>
+
+                        <div id="detectionsList" class="flex-1 overflow-y-auto space-y-2 pr-1 text-xs">
+                            <p class="text-gray-500 italic text-center py-6">Sin objetivos en el encuadre</p>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+        </section>
+
+
+        <!-- ============================================================== -->
+        <!-- PESTAÑA 2: CONFIGURACIÓN DINÁMICA DEL SISTEMA -->
+        <!-- ============================================================== -->
+        <section id="tabContentConfig" class="hidden space-y-6">
+
+            <div class="bg-dark-800/80 border border-dark-700/70 rounded-xl p-6 shadow-xl">
+                <div class="flex items-center justify-between border-b border-dark-700/60 pb-4 mb-6">
+                    <div>
+                        <h2 class="text-lg font-bold text-gray-100 flex items-center gap-2">
+                            <i data-lucide="settings" class="w-5 h-5 text-blue-400"></i> Configuración del Sistema
+                        </h2>
+                        <p class="text-xs text-gray-400 mt-1">Los cambios se guardan directamente en <code class="text-blue-300 bg-dark-900 px-1 py-0.5 rounded">config.yaml</code> y se aplican sin reiniciar el servidor.</p>
+                    </div>
+                    <button onclick="saveConfig()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-semibold flex items-center gap-2 shadow-lg shadow-blue-600/30 transition">
+                        <i data-lucide="save" class="w-4 h-4"></i> Guardar y Aplicar
+                    </button>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                    <!-- SECCIÓN 1: MOTOR DE INFERENCIA IA -->
+                    <div class="bg-dark-900/60 border border-dark-700/60 rounded-xl p-5 space-y-4">
+                        <h3 class="text-sm font-bold text-blue-400 uppercase tracking-wider flex items-center gap-2">
+                            <i data-lucide="sparkles" class="w-4 h-4"></i> Motor de Inferencia IA (YOLO)
+                        </h3>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-300 mb-1">Modelo YOLO:</label>
+                            <input id="cfgModelName" type="text" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-sm px-3 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500" value="yolov8n.pt">
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between text-xs font-semibold text-gray-300 mb-1">
+                                <span>Umbral de Confianza Mínima:</span>
+                                <span id="cfgConfLabel" class="font-mono text-blue-400">0.30</span>
+                            </div>
+                            <input id="cfgConfidence" type="range" min="0.15" max="0.85" step="0.05" value="0.30" oninput="document.getElementById('cfgConfLabel').innerText = this.value"
+                                   class="w-full h-2 bg-dark-700 rounded-lg appearance-none cursor-pointer accent-blue-500">
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-300 mb-2">Clases Objetivo Monitoreadas:</label>
+                            <div class="grid grid-cols-2 gap-2 text-xs text-gray-300">
+                                <label class="flex items-center gap-2 bg-dark-800/80 p-2 rounded border border-dark-700/60 cursor-pointer">
+                                    <input type="checkbox" value="person" class="cfg-class-checkbox accent-blue-500 rounded"> Persona
+                                </label>
+                                <label class="flex items-center gap-2 bg-dark-800/80 p-2 rounded border border-dark-700/60 cursor-pointer">
+                                    <input type="checkbox" value="car" class="cfg-class-checkbox accent-blue-500 rounded"> Auto
+                                </label>
+                                <label class="flex items-center gap-2 bg-dark-800/80 p-2 rounded border border-dark-700/60 cursor-pointer">
+                                    <input type="checkbox" value="truck" class="cfg-class-checkbox accent-blue-500 rounded"> Camioneta / Camión
+                                </label>
+                                <label class="flex items-center gap-2 bg-dark-800/80 p-2 rounded border border-dark-700/60 cursor-pointer">
+                                    <input type="checkbox" value="bus" class="cfg-class-checkbox accent-blue-500 rounded"> Bus / Furgón
+                                </label>
+                                <label class="flex items-center gap-2 bg-dark-800/80 p-2 rounded border border-dark-700/60 cursor-pointer">
+                                    <input type="checkbox" value="motorcycle" class="cfg-class-checkbox accent-blue-500 rounded"> Moto
+                                </label>
+                                <label class="flex items-center gap-2 bg-dark-800/80 p-2 rounded border border-dark-700/60 cursor-pointer">
+                                    <input type="checkbox" value="dog" class="cfg-class-checkbox accent-blue-500 rounded"> Perro
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SECCIÓN 2: AJUSTES GENERALES DEL SISTEMA -->
+                    <div class="bg-dark-900/60 border border-dark-700/60 rounded-xl p-5 space-y-4">
+                        <h3 class="text-sm font-bold text-amber-400 uppercase tracking-wider flex items-center gap-2">
+                            <i data-lucide="sliders" class="w-4 h-4"></i> Ajustes Generales y Logs
+                        </h3>
+                        <p class="text-xs text-gray-400">
+                            Configuración de consola y comportamiento general del servidor. Los parámetros de movimiento, patrullaje y calibración se configuran de forma independiente en cada cámara más abajo.
+                        </p>
+
+                        <div class="pt-2 border-t border-dark-700/60 space-y-3">
+                            <label class="flex items-start gap-2.5 text-xs text-gray-300 cursor-pointer bg-dark-800/80 p-3 rounded-lg border border-dark-700/60">
+                                <input id="cfgQuietLogs" type="checkbox" class="accent-blue-500 rounded mt-0.5">
+                                <div>
+                                    <span class="font-semibold text-gray-200 block">Omitir logs en consola (Modo silencioso)</span>
+                                    <span class="text-[11px] text-gray-400 block mt-0.5">Silencia la salida habitual en terminal y sólo imprime advertencias o errores críticos.</span>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- SECCIÓN 3: GESTIÓN DE CÁMARAS (AGREGAR / EDITAR / ELIMINAR) -->
+                <div class="mt-6 pt-6 border-t border-dark-700/60">
+                    <div class="flex items-center justify-between mb-4">
+                        <div>
+                            <h3 class="text-sm font-bold text-gray-200 uppercase tracking-wider flex items-center gap-2">
+                                <i data-lucide="video" class="w-4 h-4 text-blue-400"></i> Cámaras Monitoreadas
+                            </h3>
+                            <p class="text-xs text-gray-400">Agrega nuevas cámaras RTSP, edita credenciales o elimina cámaras del sistema.</p>
+                        </div>
+                        <button onclick="openCameraModal(-1)" class="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-lg shadow-emerald-600/20 transition">
+                            <i data-lucide="plus" class="w-3.5 h-3.5"></i> Agregar Cámara
+                        </button>
+                    </div>
+
+                    <div id="camerasListContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <!-- Renderizado dinámico desde app.js -->
+                    </div>
+                </div>
+
+            </div>
+
+        </section>
+
+    </main>
+
+    <!-- MODAL DE AGREGAR / EDITAR CÁMARA -->
+    <div id="cameraModal" class="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+        <div class="bg-dark-800 border border-dark-600 rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl">
+            <div class="px-6 py-4 border-b border-dark-700 flex items-center justify-between">
+                <h3 id="modalCameraTitle" class="text-base font-bold text-gray-100 flex items-center gap-2">
+                    <i data-lucide="video" class="w-4 h-4 text-blue-400"></i> Agregar Cámara
+                </h3>
+                <button onclick="closeCameraModal()" class="text-gray-400 hover:text-white p-1 rounded-lg">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <div class="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+                <input type="hidden" id="modalCamIndex" value="-1">
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <div class="flex items-center justify-between mb-1">
+                            <label class="block text-xs font-semibold text-gray-300">ID Único (SN de Cámara):</label>
+                            <button type="button" onclick="autoDetectCameraSN()" class="text-[10px] text-blue-400 hover:text-blue-300 font-semibold flex items-center gap-1 transition" title="Consultar a la cámara su Número de Serie físico">
+                                <i data-lucide="cpu" class="w-3 h-3"></i> Autodetectar SN
+                            </button>
+                        </div>
+                        <div class="relative">
+                            <input id="modalCamId" type="text" placeholder="ej. 8K023... o SN de cámara" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-sm px-3 py-2 text-gray-100 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-300 mb-1">Nombre Amigable:</label>
+                        <input id="modalCamName" type="text" placeholder="ej. Dahua Frente" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-sm px-3 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-300 mb-1">IP de la Cámara:</label>
+                        <input id="modalCamIp" type="text" placeholder="192.168.0.102 o 127.0.0.1" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-sm px-3 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-300 mb-1">Puerto RTSP:</label>
+                        <input id="modalCamRtspPort" type="number" value="554" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-sm px-3 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-300 mb-1">Usuario:</label>
+                        <input id="modalCamUser" type="text" value="admin" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-sm px-3 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-300 mb-1">Contraseña:</label>
+                        <input id="modalCamPass" type="password" placeholder="Contraseña" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-sm px-3 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-3 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-300 mb-1">Canal:</label>
+                        <input id="modalCamChannel" type="number" value="1" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-sm px-3 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-300 mb-1">Subtipo de Stream:</label>
+                        <select id="modalCamSubtype" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-sm px-3 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="1">Sub-stream (Óptimo IA)</option>
+                            <option value="0">Main-stream (Alta Res.)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-300 mb-1" title="Saltar cuadros de inferencia para reducir uso de CPU">Frame Skip (IA):</label>
+                        <select id="modalCamFrameSkip" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-sm px-3 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500" title="Saltar cuadros de inferencia para reducir uso de CPU">
+                            <option value="1">Cada frame (1:1 Máx. precisión)</option>
+                            <option value="2">1 de 2 frames (Ahorro 50% CPU - Recomendado)</option>
+                            <option value="3">1 de 3 frames (Ahorro 66% CPU)</option>
+                            <option value="4">1 de 4 frames (Ahorro 75% CPU)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="p-3.5 bg-dark-900/60 rounded-xl border border-dark-700 space-y-3">
+                    <label class="flex items-center gap-2 text-xs font-bold text-gray-200 cursor-pointer">
+                        <input id="modalCamPtzEnabled" type="checkbox" onchange="togglePtzFields(this.checked)" class="accent-blue-500 rounded">
+                        Esta cámara cuenta con motores PTZ (Movimiento)
+                    </label>
+
+                    <div id="modalPtzFields" class="space-y-3 hidden pt-1">
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-300 mb-1">Driver PTZ:</label>
+                                <select id="modalCamPtzDriver" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-2.5 py-1.5 text-gray-100">
+                                    <option value="onvif">ONVIF (Estándar)</option>
+                                    <option value="dahua_cgi">Dahua CGI</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-300 mb-1">Puerto ONVIF/CGI:</label>
+                                <input id="modalCamOnvifPort" type="number" value="57858" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-2.5 py-1.5 text-gray-100">
+                            </div>
+                        </div>
+
+                        <!-- Ajustes de Patrullaje e Inmovilidad Específicos para esta Cámara -->
+                        <div class="pt-2 border-t border-dark-700/60 space-y-3">
+                            <!-- Selector de Modo de Patrullaje -->
+                            <div class="pt-2 border-t border-dark-700/60 space-y-3">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-[11px] font-bold uppercase tracking-wider text-amber-400">
+                                        Estrategia de Patrullaje en Reposo:
+                                    </span>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-gray-300 mb-1">Tipo de Patrulla:</label>
+                                    <select id="modalCamPatrolType" onchange="togglePatrolTypeFields(this.value)" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-2.5 py-1.5 text-gray-100">
+                                        <option value="panoramic">Barrido Continuo Panorámico (355° Horizontal + Vertical)</option>
+                                        <option value="preset_tour">Ronda de Presets (Guard Tour por Puntos Clave)</option>
+                                    </select>
+                                </div>
+
+                                <!-- Sub-panel: Barrido Panorámico -->
+                                <div id="panelPatrolPanoramic" class="space-y-3">
+                                    <div class="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label class="block text-xs font-semibold text-gray-300 mb-1">Barrido Horiz. (Segundos):</label>
+                                            <input id="modalCamSweepTime" type="number" step="0.5" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-2.5 py-1.5 text-gray-100" value="14.0">
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-semibold text-gray-300 mb-1">Velocidad de Giro:</label>
+                                            <input id="modalCamPatrolSpeed" type="number" step="0.05" min="0.1" max="1.0" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-2.5 py-1.5 text-gray-100" value="0.35">
+                                        </div>
+                                    </div>
+
+                                    <div class="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label class="block text-xs font-semibold text-gray-300 mb-1">Inclinación Tilt (Segundos):</label>
+                                            <input id="modalCamTiltTime" type="number" step="0.5" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-2.5 py-1.5 text-gray-100" value="3.0">
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-semibold text-gray-300 mb-1">Velocidad Inclinación:</label>
+                                            <input id="modalCamTiltSpeed" type="number" step="0.05" min="0.1" max="1.0" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-2.5 py-1.5 text-gray-100" value="0.35">
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Sub-panel: Ronda de Presets (Guard Tour) con Dwell Time -->
+                                <div id="panelPatrolPresets" class="space-y-2 hidden">
+                                    <div class="flex items-center justify-between">
+                                        <div class="flex items-center gap-1.5">
+                                            <span class="text-xs font-semibold text-gray-300">Puntos de Vigilancia:</span>
+                                            <span class="text-[10px] text-gray-400 font-mono flex items-center gap-0.5">
+                                                (arrastra <i data-lucide="grip-vertical" class="w-3 h-3 inline text-gray-400"></i> para ordenar)
+                                            </span>
+                                        </div>
+                                        <div class="flex items-center gap-1.5">
+                                            <button type="button" onclick="fetchCameraPresets()" class="px-2 py-0.5 bg-dark-700 hover:bg-dark-600 text-cyan-300 border border-dark-500 rounded text-[11px] font-semibold flex items-center gap-1 transition" title="Consultar presets reales guardados en la cámara física">
+                                                <i data-lucide="refresh-cw" class="w-3 h-3"></i> Leer Cámara
+                                            </button>
+                                            <button type="button" onclick="addTourStepRow()" class="px-2 py-0.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-[11px] font-semibold flex items-center gap-1 transition">
+                                                <i data-lucide="plus" class="w-3 h-3"></i> + Parada
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <!-- Aviso de presets reales detectados -->
+                                    <div id="detectedPresetsHint" class="text-[10px] text-gray-400 bg-dark-800/80 p-1.5 rounded border border-dark-600 flex items-center justify-between hidden">
+                                        <span>Presets en cámara:</span>
+                                        <span id="detectedPresetsBadges" class="font-mono text-cyan-300 font-bold"></span>
+                                    </div>
+                                    <div id="tourStepsContainer" class="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                                        <!-- Filas dinámicas generadas por JS -->
+                                    </div>
+                                </div>
+
+
+                                <div class="grid grid-cols-2 gap-3 pt-1">
+                                    <div>
+                                        <label class="block text-xs font-semibold text-gray-300 mb-1">Timeout Inmóvil (s):</label>
+                                        <input id="modalCamStaticTimeout" type="number" step="0.5" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-2.5 py-1.5 text-gray-100" value="3.0">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-semibold text-gray-300 mb-1">Pausa Control Web (s):</label>
+                                        <input id="modalCamManualPause" type="number" step="0.5" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-2.5 py-1.5 text-gray-100" value="1.0">
+                                    </div>
+                                </div>
+                            </div>
+
+
+                            <!-- Opciones Modulares de esta Cámara -->
+                            <div class="pt-2 border-t border-dark-700/60 space-y-2">
+                                <span class="text-[11px] font-bold uppercase tracking-wider text-emerald-400 block">
+                                    Comportamiento Modular (IA y Patrulla):
+                                </span>
+                                <div class="grid grid-cols-2 gap-2 text-xs text-gray-300">
+                                    <label class="flex items-center gap-2 bg-dark-800/80 p-2 rounded border border-dark-700/60 cursor-pointer">
+                                        <input id="modalCamTrackingEnabled" type="checkbox" class="accent-emerald-500 rounded" checked>
+                                        <span>Seguimiento IA</span>
+                                    </label>
+                                    <label class="flex items-center gap-2 bg-dark-800/80 p-2 rounded border border-dark-700/60 cursor-pointer">
+                                        <input id="modalCamPatrolEnabled" type="checkbox" class="accent-blue-500 rounded" checked>
+                                        <span>Patrullaje Búsqueda</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Modo de Posicionamiento / Calibración -->
+                            <div class="pt-2 border-t border-dark-700/60 space-y-2">
+                                <span class="text-[11px] font-bold uppercase tracking-wider text-blue-400 block">
+                                    Posicionamiento y Calibración:
+                                </span>
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label class="block text-xs font-semibold text-gray-300 mb-1">Método de Retorno:</label>
+                                        <select id="modalCamPosMode" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-2.5 py-1.5 text-gray-100">
+                                            <option value="native_preset">Nativo (Preset 1 de Cámara)</option>
+                                            <option value="time_based">Temporizado (Barrido por Segundos)</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-semibold text-gray-300 mb-1">Preset Home ID:</label>
+                                        <input id="modalCamHomePreset" type="text" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-2.5 py-1.5 text-gray-100" value="1">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="pt-1">
+                                <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+                                    <input id="modalCamInitialHoming" type="checkbox" class="accent-blue-500 rounded">
+                                    Ejecutar Calibración / Ir a Home al iniciar el sistema
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="px-6 py-4 bg-dark-900/50 border-t border-dark-700 flex justify-end gap-3">
+                <button onclick="closeCameraModal()" class="px-4 py-2 bg-dark-700 hover:bg-dark-600 text-gray-300 rounded-lg text-xs font-semibold transition">
+                    Cancelar
+                </button>
+                <button onclick="saveCameraModal()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow transition">
+                    <i data-lucide="check" class="w-3.5 h-3.5"></i> Guardar Cámara
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- NOTIFICACIONES TOAST -->
+    <div id="toastContainer" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+    <!-- Scripts de la Aplicación -->
+    <script src="/static/js/app.js"></script>
+    <script>
+        // Inicializar iconos de Lucide
+        lucide.createIcons();
+    </script>
+</body>
+</html>

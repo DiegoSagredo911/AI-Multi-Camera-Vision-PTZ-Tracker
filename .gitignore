@@ -1,0 +1,24 @@
+# Entorno Virtual Python
+.venv/
+venv/
+ENV/
+env/
+
+# Bytecode y Caché de Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Modelos descargados de Ultralytics YOLO
+*.pt
+*.onnx
+*.engine
+
+# Sistema Operativo
+.DS_Store
+Thumbs.db
+
+# IDEs
+.idea/
+.vscode/
