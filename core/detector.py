@@ -53,6 +53,7 @@ class ObjectDetector:
         self.colors = {
             "person": (0, 255, 0),      # Verde
             "dog": (0, 165, 255),       # Naranja
+            "cat": (255, 105, 180),     # Rosa / Magenta
             "car": (255, 100, 0),       # Azul
             "default": (255, 255, 0)    # Cyan
         }

@@ -1,5 +1,49 @@
-cameras: []
-
+cameras:
+- id: CAM_127_0_0_1
+  name: Cámara cam_1
+  type: rtsp
+  camera_ip: 127.0.0.1
+  rtsp_port: 40154
+  username: admin
+  password: Refugio2017623
+  channel: 1
+  subtype: 1
+  frame_skip: 1
+  reconnect_interval_sec: 5
+  spotlight:
+    enabled: true
+    night_only: true
+    trigger_classes:
+    - person
+    cooldown_sec: 4
+  ptz:
+    enabled: auto
+    driver: onvif
+    onvif_port: 40154
+    patrol_interval_sec: 12
+    patrol_type: preset_tour
+    preset_tour:
+    - preset: '1'
+      dwell_time_sec: 20
+    - preset: '4'
+      dwell_time_sec: 20
+    - preset: '2'
+      dwell_time_sec: 20
+    patrol_speed: 0.35
+    panoramic_patrol: true
+    sweep_pan_time_sec: 14
+    tilt_transition_time_sec: 3
+    patrol_tilt_speed: 0.35
+    tracking_speed: 0.65
+    deadzone_x: 0.08
+    deadzone_y: 0.08
+    static_target_timeout_sec: 3
+    manual_override_pause_sec: 180
+    tracking_enabled: true
+    patrol_enabled: true
+    positioning_mode: native_preset
+    home_preset: '1'
+    initial_homing: true
 storage:
   save_video: false
   save_snapshots: false
@@ -12,6 +56,7 @@ detection:
   - bus
   - motorcycle
   - dog
+  - cat
   confidence: 0.3
   device: auto
 display:
