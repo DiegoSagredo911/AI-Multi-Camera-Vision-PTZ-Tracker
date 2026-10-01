@@ -39,6 +39,12 @@ Incorpora una **Interfaz Gráfica Web interactiva (FastAPI + WebSocket)** para m
 - **Optimización CPU: Frame Skipping Configurable (Ideal Servidores / Mini PC):**
   - Salto inteligente de cuadros de inferencia (1x, 2x, 3x, 4x) configurable individualmente por cámara.
   - Reduce el uso de CPU hasta en un **50% a 75%** manteniendo el lazo de seguimiento PTZ fluido y la visualización activa.
+- **Disuasión Activa / Flash Inteligente (Luz Blanca Óptica 100% Silenciosa):**
+  - Enciende automáticamente el foco de luz blanca o flash óptico de la cámara Dahua / PTZ al detectar objetivos.
+  - **Filtro Selectivo por Cámara:** Activación para *Solo Personas*, *Personas y Vehículos* o *Cualquier Detección*.
+  - **Condición de Visión Nocturna Automática:** Detección instantánea de infrarrojos en RAM por saturación cromática (`HSV`), activando el flash solo de noche o siempre según se configure.
+  - **Garantía Silenciosa (Cero Sirenas):** Excluye completamente altavoces y alarmas acústicas, operando de forma 100% óptica.
+  - Temporizador de apagado suave (*Cooldown*) tras la retirada del objetivo y botón de prueba rápida en vivo.
 - **Operación 100% en Memoria RAM (Cero Almacenamiento en Disco):**
   - El sistema no escribe archivos de video temporales ni degrada discos SSD. La grabación continua queda a cargo del DVR / NVR existente.
 - **Control de Logs en Consola (Modo Silencioso):**

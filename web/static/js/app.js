@@ -317,6 +317,26 @@ function updateDashboard(data) {
                     coordsBox.classList.add("hidden");
                 }
             }
+
+            // Badges de Visión Nocturna y Flash / Luz Blanca
+            const spotBadge = document.getElementById("spotlightStatusBadge");
+            const nightBadge = document.getElementById("nightVisionBadge");
+            if (cam.spotlight) {
+                if (spotBadge) {
+                    if (cam.spotlight.active) {
+                        spotBadge.classList.remove("hidden");
+                    } else {
+                        spotBadge.classList.add("hidden");
+                    }
+                }
+                if (nightBadge) {
+                    if (cam.spotlight.is_night) {
+                        nightBadge.classList.remove("hidden");
+                    } else {
+                        nightBadge.classList.add("hidden");
+                    }
+                }
+            }
         }
     });
 
@@ -414,6 +434,11 @@ function renderCamerasList() {
             ? `<span class="px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30 text-[10px] font-semibold">PTZ (${cam.ptz.driver || 'ONVIF'}:${cam.ptz.onvif_port || 57858})</span>`
             : `<span class="px-2 py-0.5 rounded bg-gray-700 text-gray-400 border border-gray-600 text-[10px]">Cámara Fija</span>`;
 
+        const hasSpotlight = cam.spotlight && cam.spotlight.enabled;
+        const spotlightBadge = hasSpotlight
+            ? `<span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-semibold flex items-center gap-1"><i data-lucide="zap" class="w-2.5 h-2.5"></i> Flash</span>`
+            : '';
+
         return `
             <div class="bg-dark-900/70 border border-dark-700/80 rounded-xl p-4 flex flex-col justify-between shadow-lg">
                 <div>
@@ -424,7 +449,7 @@ function renderCamerasList() {
                             </h4>
                             <span class="text-[10px] font-mono text-gray-500">ID: ${cam.id}</span>
                         </div>
-                        <div>${ptzLabel}</div>
+                        <div class="flex items-center gap-1">${ptzLabel} ${spotlightBadge}</div>
                     </div>
 
                     <div class="space-y-1 text-xs text-gray-400 pt-2 border-t border-dark-800">
@@ -440,6 +465,12 @@ function renderCamerasList() {
                             <span>Canal / Stream:</span>
                             <span class="font-mono text-gray-300">Ch ${cam.channel || 1} (${cam.subtype === 0 ? 'Main' : 'Sub'}) | Skip: ${cam.frame_skip || 1}x</span>
                         </div>
+                        ${hasSpotlight ? `
+                        <div class="flex justify-between text-[11px] text-amber-300/90 pt-1 border-t border-dark-800/80">
+                            <span>Flash Óptico:</span>
+                            <span class="font-mono text-[10px]">${cam.spotlight.night_only !== false ? 'Solo Noche' : 'Día y Noche'} (${cam.spotlight.cooldown_sec || 8}s)</span>
+                        </div>
+                        ` : ''}
                         ${hasPtz && cam.ptz ? `
                         <div class="flex justify-between text-[11px] text-amber-400/90 pt-1 border-t border-dark-800/80">
                             <span>Barrido / Inclinación:</span>
@@ -529,6 +560,22 @@ function openCameraModal(index = -1) {
             // Consultar presets en segundo plano únicamente para enriquecer los nombres descriptivos
             populatePresetNames();
         }
+
+        // Cargar configuración de Disuasión Activa / Flash Inteligente
+        const spot = cam.spotlight || {};
+        const spotEnabled = Boolean(spot.enabled);
+        document.getElementById("modalCamSpotlightEnabled").checked = spotEnabled;
+        toggleSpotlightFields(spotEnabled);
+        document.getElementById("modalCamSpotlightCondition").value = (spot.night_only === false) ? "always" : "night_only";
+        let targetVal = "person";
+        if (Array.isArray(spot.trigger_classes)) {
+            if (spot.trigger_classes.includes("all")) targetVal = "all";
+            else if (spot.trigger_classes.includes("car") || spot.trigger_classes.includes("vehicles")) targetVal = "person_vehicle";
+            else targetVal = "person";
+        }
+        document.getElementById("modalCamSpotlightTargets").value = targetVal;
+        document.getElementById("modalCamSpotlightCooldown").value = spot.cooldown_sec ?? 8;
+
     } else {
         detectedCameraPresets = [];
         const hintBox = document.getElementById("detectedPresetsHint");
@@ -563,6 +610,13 @@ function openCameraModal(index = -1) {
         renderTourSteps(currentModalTour);
         document.getElementById("modalCamInitialHoming").checked = true;
         togglePtzFields(false);
+
+        // Reset campos de Spotlight para cámara nueva
+        document.getElementById("modalCamSpotlightEnabled").checked = false;
+        toggleSpotlightFields(false);
+        document.getElementById("modalCamSpotlightCondition").value = "night_only";
+        document.getElementById("modalCamSpotlightTargets").value = "person";
+        document.getElementById("modalCamSpotlightCooldown").value = 8;
     }
 
     modal.classList.remove("hidden");
@@ -858,6 +912,72 @@ function togglePtzFields(enabled) {
     }
 }
 
+function toggleSpotlightFields(enabled) {
+    const fields = document.getElementById("modalSpotlightFields");
+    if (fields) {
+        if (enabled) fields.classList.remove("hidden");
+        else fields.classList.add("hidden");
+    }
+}
+
+async function testModalSpotlight() {
+    const camId = document.getElementById("modalCamId").value.trim();
+    if (!camId) {
+        showToast("Ingresa primero el ID de la cámara.", "warning");
+        return;
+    }
+    const btn = document.getElementById("btnTestSpotlight");
+    if (btn) btn.disabled = true;
+    showToast("Enviando comando óptico de prueba (5s)...", "info");
+
+    try {
+        const res = await fetch(`/api/ptz/${camId}/spotlight`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ test: true, duration_sec: 5.0 })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast("¡Flash óptico encendido por 5 segundos!", "success");
+        } else {
+            showToast(data.message || "La cámara no respondió al comando de flash.", "warning");
+        }
+    } catch (err) {
+        showToast("Error de conexión al enviar comando de flash.", "error");
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+async function testActiveCameraSpotlight() {
+    const targetId = activeCameraId === "grid" ? (currentConfig.cameras && currentConfig.cameras[0] ? currentConfig.cameras[0].id : null) : activeCameraId;
+    if (!targetId) {
+        showToast("Selecciona primero una cámara para probar el flash.", "warning");
+        return;
+    }
+    const btn = document.getElementById("btnSpotlightTest");
+    if (btn) btn.disabled = true;
+    showToast(`Probando flash óptico en ${targetId} (5s)...`, "info");
+
+    try {
+        const res = await fetch(`/api/ptz/${targetId}/spotlight`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ test: true, duration_sec: 5.0 })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast("¡Flash encendido durante 5 segundos!", "success");
+        } else {
+            showToast(data.message || "La cámara no respondió al comando de flash.", "warning");
+        }
+    } catch (err) {
+        showToast("Error comunicando con la cámara.", "error");
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
 async function saveCameraModal() {
     const index = parseInt(document.getElementById("modalCamIndex").value);
     const camId = document.getElementById("modalCamId").value.trim();
@@ -884,6 +1004,19 @@ async function saveCameraModal() {
 
     const patrolType = document.getElementById("modalCamPatrolType").value;
 
+    // Disuasión Activa / Flash Óptico
+    const spotEnabled = document.getElementById("modalCamSpotlightEnabled").checked;
+    const spotCond = document.getElementById("modalCamSpotlightCondition").value;
+    const spotTargets = document.getElementById("modalCamSpotlightTargets").value;
+    const spotCooldown = parseFloat(document.getElementById("modalCamSpotlightCooldown").value) || 8.0;
+
+    let targetClasses = ["person"];
+    if (spotTargets === "person_vehicle") {
+        targetClasses = ["person", "car", "motorcycle", "bus", "truck"];
+    } else if (spotTargets === "all") {
+        targetClasses = ["all"];
+    }
+
     const newCamData = {
         id: camId,
         name: camName,
@@ -896,6 +1029,12 @@ async function saveCameraModal() {
         subtype: subtype,
         frame_skip: frameSkip,
         reconnect_interval_sec: 5,
+        spotlight: {
+            enabled: spotEnabled,
+            night_only: (spotCond === "night_only"),
+            trigger_classes: targetClasses,
+            cooldown_sec: spotCooldown
+        },
         ptz: hasPtz ? {
             enabled: "auto",
             driver: ptzDriver,

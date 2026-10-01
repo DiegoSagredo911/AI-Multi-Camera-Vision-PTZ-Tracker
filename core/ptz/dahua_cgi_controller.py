@@ -4,6 +4,7 @@ Alternativa ligera al protocolo SOAP de ONVIF.
 """
 
 import logging
+from typing import Optional, Dict, Any
 import requests
 from requests.auth import HTTPDigestAuth, HTTPBasicAuth
 from .base import BasePTZController
@@ -35,6 +36,11 @@ class DahuaCgiPTZController(BasePTZController):
         self._auth = HTTPDigestAuth(self.username, self.password)
         self._available = False
         self._current_command = None
+
+        # Control óptico de luz blanca / foco / flash (Cero audio)
+        self._white_light_supported: Optional[bool] = None
+        self._white_light_method: Optional[str] = None  # "lighting" o "ptz_aux"
+        self._white_light_state: bool = False
 
         self._check_availability()
 
@@ -262,6 +268,107 @@ class DahuaCgiPTZController(BasePTZController):
             logger.debug(f"Error al consultar Dahua CGI getSerialNo: {e}")
 
         return None
+
+    def _detect_white_light_capabilities(self):
+        """
+        Sondea silenciosamente a la cámara Dahua para verificar si cuenta con
+        soporte para iluminador óptico / luz blanca (Cero audio/sirenas).
+        """
+        if not self._available:
+            self._white_light_supported = False
+            return
+
+        try:
+            # 1. Probar gestor de iluminación Dahua Lighting
+            lighting_url = f"http://{self.ip}:{self.port}/cgi-bin/configManager.cgi?action=getConfig&name=Lighting"
+            res = requests.get(lighting_url, auth=self._auth, timeout=2.0)
+            if res.status_code == 200 and ("Lighting" in res.text or "table.Lighting" in res.text):
+                self._white_light_supported = True
+                self._white_light_method = "lighting"
+                logger.info("Soporte de Luz Blanca Óptica Dahua detectado (Método: Lighting CGI).")
+                return
+
+            # 2. Probar si soporta comando auxiliar óptico PTZ Aux1
+            aux_test_url = f"{self.base_url}?action=stop&channel={self.channel}&code=Aux1&arg1=1&arg2=0&arg3=0"
+            res_aux = requests.get(aux_test_url, auth=self._auth, timeout=2.0)
+            if res_aux.status_code == 200 and "OK" in res_aux.text:
+                self._white_light_supported = True
+                self._white_light_method = "ptz_aux"
+                logger.info("Soporte de Luz Blanca Óptica Dahua detectado (Método: PTZ Aux1).")
+                return
+
+            # Si ninguno respondió afirmativamente
+            self._white_light_supported = False
+            self._white_light_method = None
+            logger.debug("La cámara Dahua no expuso control de iluminador óptico por CGI.")
+        except Exception as e:
+            logger.debug(f"Error detectando capacidades de luz blanca Dahua: {e}")
+            self._white_light_supported = False
+
+    def set_white_light(self, state: bool) -> bool:
+        """
+        Enciende (state=True) o apaga (state=False) el foco de luz blanca de forma 100% silenciosa y óptica.
+        Garantizado: Cero comandos de sonido, sirenas o altavoces.
+        """
+        if not self._available:
+            return False
+
+        if self._white_light_supported is None:
+            self._detect_white_light_capabilities()
+
+        # Si el método no fue detectado aún, intentar con lighting por defecto
+        method = self._white_light_method or "lighting"
+
+        success = False
+        try:
+            if method == "lighting":
+                # Intentar método 1: Modo Manual con NearLight al 100% / Auto al apagar
+                if state:
+                    url = f"http://{self.ip}:{self.port}/cgi-bin/configManager.cgi?action=setConfig&Lighting[0][0].Mode=Manual&Lighting[0][0].NearLight[0].Light=100"
+                else:
+                    url = f"http://{self.ip}:{self.port}/cgi-bin/configManager.cgi?action=setConfig&Lighting[0][0].Mode=Auto"
+
+                res = requests.get(url, auth=self._auth, timeout=2.0)
+                if res.status_code == 200 and "OK" in res.text:
+                    success = True
+                else:
+                    # Método alternativo: ForceOn / ForceOff
+                    mode_val = "ForceOn" if state else "ForceOff"
+                    alt_url = f"http://{self.ip}:{self.port}/cgi-bin/configManager.cgi?action=setConfig&Lighting[0][0].Mode={mode_val}"
+                    alt_res = requests.get(alt_url, auth=self._auth, timeout=2.0)
+                    if alt_res.status_code == 200 and "OK" in alt_res.text:
+                        success = True
+
+            elif method == "ptz_aux":
+                action = "start" if state else "stop"
+                url = f"{self.base_url}?action={action}&channel={self.channel}&code=Aux1&arg1=1&arg2=0&arg3=0"
+                res = requests.get(url, auth=self._auth, timeout=2.0)
+                if res.status_code == 200 and "OK" in res.text:
+                    success = True
+
+            if success:
+                self._white_light_state = state
+                self._white_light_supported = True
+                logger.info(f"Luz Blanca Dahua {'ENCENDIDA (Flash)' if state else 'APAGADA (Reposo)'} con éxito.")
+                return True
+            else:
+                logger.debug(f"Fallo al enviar comando de luz blanca Dahua (state={state}).")
+                return False
+
+        except Exception as e:
+            logger.error(f"Error al conmutar luz blanca Dahua: {e}")
+            return False
+
+    def get_white_light_status(self) -> Dict[str, Any]:
+        """
+        Retorna el estado actual del iluminador óptico.
+        """
+        return {
+            "supported": bool(self._white_light_supported) if self._white_light_supported is not None else False,
+            "active": self._white_light_state,
+            "method": self._white_light_method
+        }
+
 
 
 

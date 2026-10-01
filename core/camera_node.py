@@ -63,6 +63,20 @@ class CameraNode:
         self.frame_skip: int = max(1, int(cam_config.get("frame_skip", global_detection_config.get("frame_skip", 1))))
         self.frame_count: int = 0
 
+        # Configuración de Disuasión Activa / Flash Inteligente (Luz Blanca Óptica)
+        spotlight_cfg = cam_config.get("spotlight", {})
+        self.spotlight_enabled: bool = bool(spotlight_cfg.get("enabled", False))
+        self.spotlight_night_only: bool = bool(spotlight_cfg.get("night_only", True))
+        raw_targets = spotlight_cfg.get("trigger_classes", ["person"])
+        if isinstance(raw_targets, str):
+            raw_targets = [raw_targets]
+        self.spotlight_targets: list = list(raw_targets)
+        self.spotlight_cooldown: float = float(spotlight_cfg.get("cooldown_sec", 8.0))
+        self.spotlight_active: bool = False
+        self.spotlight_off_time: float = 0.0
+        self.is_night_vision: bool = False
+        self.saturation_mean: float = 50.0
+
     def _resolve_source(self, cfg: Dict[str, Any]):
         """Construye la URL o fuente para este nodo de cámara."""
         source_type = cfg.get("type", "rtsp").lower()
@@ -98,6 +112,70 @@ class CameraNode:
         """Retorna (éxito, frame) desde memoria RAM."""
         return self.stream.read()
 
+    def _check_night_vision(self, frame: np.ndarray) -> bool:
+        """
+        Detecta en tiempo real (100% en RAM) si la cámara está en visión nocturna infrarroja.
+        Cuando una cámara conmuta a IR/noche, la imagen es monocromática (saturación HSV cercana a 0).
+        """
+        try:
+            # Muestrear a baja resolución para computar en < 0.1 ms sin retraso
+            small = cv2.resize(frame, (160, 90), interpolation=cv2.INTER_NEAREST)
+            hsv = cv2.cvtColor(small, cv2.COLOR_BGR2HSV)
+            sat = float(np.mean(hsv[:, :, 1]))
+            self.saturation_mean = sat
+            # Saturación < 18.0 indica inequívocamente modo nocturno infrarrojo
+            self.is_night_vision = bool(sat < 18.0)
+            return self.is_night_vision
+        except Exception:
+            return self.is_night_vision
+
+    def _evaluate_spotlight(self, detections: list):
+        """
+        Evalúa si las detecciones actuales deben disparar o mantener la luz blanca / flash óptico.
+        Respeta la condición de visión nocturna y el filtro de objetivos (personas, vehículos, etc.).
+        Garantizado: Cero alarmas de sonido ni sirenas.
+        """
+        now = time.time()
+        if not self.spotlight_enabled or not self.ptz_manager.has_hardware_ptz():
+            if self.spotlight_active:
+                self.ptz_manager.set_white_light(False)
+                self.spotlight_active = False
+            return
+
+        # 1. Comprobar condición de noche
+        night_condition_met = (not self.spotlight_night_only) or self.is_night_vision
+
+        # 2. Comprobar si hay algún objetivo que coincida con el filtro
+        matching_target = False
+        if night_condition_met and detections:
+            vehicle_classes = {"car", "truck", "bus", "motorcycle"}
+            for d in detections:
+                cls_name = d.get("class_name", "")
+                if "all" in self.spotlight_targets:
+                    matching_target = True
+                    break
+                if cls_name in self.spotlight_targets:
+                    matching_target = True
+                    break
+                if "vehicles" in self.spotlight_targets and cls_name in vehicle_classes:
+                    matching_target = True
+                    break
+
+        # 3. Disparar encendido o prolongar cooldown
+        if matching_target:
+            self.spotlight_off_time = now + self.spotlight_cooldown
+            if not self.spotlight_active:
+                success = self.ptz_manager.set_white_light(True)
+                if success:
+                    self.spotlight_active = True
+                    logger.info(f"[{self.name}] Disuasión Óptica ACTIVADA por detección.")
+        else:
+            # No hay objetivos válidos presentes
+            if self.spotlight_active and now >= self.spotlight_off_time:
+                self.ptz_manager.set_white_light(False)
+                self.spotlight_active = False
+                logger.info(f"[{self.name}] Disuasión Óptica APAGADA tras cooldown de {self.spotlight_cooldown}s.")
+
     def update_cycle(self, frame: np.ndarray, detections: list, primary_target: Optional[dict], detector):
         """
         Actualiza el estado de la cámara tras la inferencia completa de IA.
@@ -115,6 +193,12 @@ class CameraNode:
             self.current_target_id = primary_target["track_id"]
         else:
             self.current_target_id = None
+
+        # Detectar visión nocturna en RAM
+        self._check_night_vision(frame)
+
+        # Evaluar disuasión óptica / flash
+        self._evaluate_spotlight(detections)
 
         # Actualizar lazo PTZ independiente
         self.ptz_manager.update(primary_target)
@@ -152,6 +236,9 @@ class CameraNode:
         # Mantener seguimiento PTZ activo con el objetivo prioritario actual
         self.ptz_manager.update(self.last_primary_target)
 
+        # Evaluar disuasión óptica / flash también en frames saltados
+        self._evaluate_spotlight(self.last_detections)
+
         # Aplicar PTZ digital si está activo
         processed_frame = frame
         if self.ptz_manager.use_digital_ptz:
@@ -179,9 +266,15 @@ class CameraNode:
             fps=self.fps
         )
 
-        # Añadir cintillo con el nombre del canal de la cámara
+        # Añadir cintillo con el nombre del canal, estado Noche y Flash
         h, w = canvas.shape[:2]
-        badge_text = f"[{self.name}]"
+        badges = [f"[{self.name}]"]
+        if self.is_night_vision:
+            badges.append("[IR NOCHE]")
+        if self.spotlight_active:
+            badges.append("[FLASH ON]")
+        badge_text = " ".join(badges)
+
         cv2.putText(
             canvas, badge_text, (10, h - 12),
             cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2, cv2.LINE_AA
@@ -245,6 +338,15 @@ class CameraNode:
             "fps": round(self.fps, 1),
             "frame_skip": self.frame_skip,
             "ptz": self.ptz_manager.get_state_dict(),
+            "spotlight": {
+                "enabled": self.spotlight_enabled,
+                "active": self.spotlight_active,
+                "is_night": self.is_night_vision,
+                "night_only": self.spotlight_night_only,
+                "trigger_classes": self.spotlight_targets,
+                "cooldown_sec": self.spotlight_cooldown,
+                "supported": self.ptz_manager.is_white_light_supported()
+            },
             "detections_count": len(dets),
             "detections": dets,
             "primary_target_id": primary_id

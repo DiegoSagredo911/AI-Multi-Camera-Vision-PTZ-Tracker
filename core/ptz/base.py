@@ -3,6 +3,7 @@ Interfaz base abstracta para controladores PTZ universales.
 """
 
 from abc import ABC, abstractmethod
+from typing import Optional, Dict, Any
 
 
 class BasePTZController(ABC):
@@ -69,6 +70,19 @@ class BasePTZController(ABC):
         Retorna el Número de Serie (SN) único del hardware de la cámara si está disponible.
         """
         return None
+
+    def set_white_light(self, state: bool) -> bool:
+        """
+        Enciende (state=True) o apaga (state=False) el foco / flash de luz blanca óptica.
+        Retorna True si el comando fue aceptado por el hardware.
+        """
+        return False
+
+    def get_white_light_status(self) -> Dict[str, Any]:
+        """
+        Retorna el estado de soporte y activación del foco de luz blanca.
+        """
+        return {"supported": False, "active": False}
 
     def close(self):
         """

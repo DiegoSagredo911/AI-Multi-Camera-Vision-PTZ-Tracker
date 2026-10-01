@@ -25,6 +25,11 @@ class PTZMoveRequest(BaseModel):
     tilt: float = 0.0
     zoom: float = 0.0
 
+class SpotlightControlRequest(BaseModel):
+    state: Optional[bool] = None
+    test: bool = False
+    duration_sec: float = 5.0
+
 class ConfigUpdateRequest(BaseModel):
     config: Dict[str, Any]
 
@@ -318,6 +323,48 @@ async def ptz_goto_preset(cam_id: str, preset_id: str = "1"):
     }
 
 
+@app.post("/api/ptz/{cam_id}/spotlight")
+async def ptz_control_spotlight(cam_id: str, req: SpotlightControlRequest):
+    """
+    Controla el foco de luz blanca / flash óptico de la cámara (Cero audio/sirena).
+    Permite encender, apagar o ejecutar una prueba temporal de X segundos.
+    """
+    node = web_manager.get_node(cam_id)
+    if not node:
+        raise HTTPException(status_code=404, detail="Cámara no encontrada")
+
+    if not node.ptz_manager.has_hardware_ptz():
+        raise HTTPException(status_code=400, detail="La cámara no cuenta con hardware PTZ/CGI configurable")
+
+    if req.test:
+        success = node.ptz_manager.set_white_light(True)
+        node.spotlight_active = True
+
+        async def turn_off_later(sec: float):
+            await asyncio.sleep(sec)
+            node.ptz_manager.set_white_light(False)
+            node.spotlight_active = False
+
+        asyncio.create_task(turn_off_later(req.duration_sec))
+        return {
+            "success": success,
+            "cam_id": cam_id,
+            "active": True,
+            "message": f"Prueba de flash óptico iniciada ({req.duration_sec}s)."
+        }
+
+    target_state = bool(req.state)
+    success = node.ptz_manager.set_white_light(target_state)
+    node.spotlight_active = target_state
+    return {
+        "success": success,
+        "cam_id": cam_id,
+        "active": target_state,
+        "message": f"Foco de luz blanca {'ENCENDIDO' if target_state else 'APAGADO'}."
+    }
+
+
+
 
 @app.get("/api/ptz/{cam_id}/presets")
 async def ptz_list_presets(cam_id: str):
@@ -466,6 +513,18 @@ async def update_config(req: ConfigUpdateRequest):
                     node.ptz_manager.tour_current_idx = 0
                     node.ptz_manager.tour_substate = "MOVING"
                     node.ptz_manager.tour_cmd_sent_time = 0.0
+
+                # Actualizar parámetros de Disuasión Óptica / Flash en caliente
+                if "spotlight" in c_cfg:
+                    sc = c_cfg["spotlight"]
+                    node.spotlight_enabled = bool(sc.get("enabled", False))
+                    node.spotlight_night_only = bool(sc.get("night_only", True))
+                    raw_targets = sc.get("trigger_classes", ["person"])
+                    if isinstance(raw_targets, str):
+                        raw_targets = [raw_targets]
+                    node.spotlight_targets = list(raw_targets)
+                    node.spotlight_cooldown = float(sc.get("cooldown_sec", 8.0))
+
 
 
 

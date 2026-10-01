@@ -163,13 +163,21 @@
                     <div class="bg-dark-800/80 border border-dark-700/70 rounded-xl p-4 shadow">
                         <div class="flex items-center justify-between mb-3 border-b border-dark-700/60 pb-2">
                             <h2 class="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
-                                <i data-lucide="gamepad-2" class="w-4 h-4 text-blue-400"></i> Control Motorizado PTZ
+                                <i data-lucide="gamepad-2" class="w-4 h-4 text-blue-400"></i> Control PTZ
                             </h2>
-                            <span id="ptzStatusBadge" class="text-[10px] px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">IDLE</span>
+                            <div class="flex items-center gap-1.5">
+                                <span id="nightVisionBadge" class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 hidden flex items-center gap-1" title="Visión Nocturna Infrarroja activa">
+                                    <i data-lucide="moon" class="w-2.5 h-2.5"></i> IR
+                                </span>
+                                <span id="spotlightStatusBadge" class="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 hidden flex items-center gap-1 animate-pulse" title="Flash Óptico Encendido">
+                                    <i data-lucide="zap" class="w-2.5 h-2.5"></i> FLASH
+                                </span>
+                                <span id="ptzStatusBadge" class="text-[10px] px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">IDLE</span>
+                            </div>
                         </div>
 
                         <!-- MODOS MODULARES (Interruptores Rápidos) -->
-                        <div class="grid grid-cols-2 gap-2 mb-3">
+                        <div class="grid grid-cols-2 gap-2 mb-2">
                             <button id="btnTrackingToggle" onclick="toggleTrackingModular()" class="px-2.5 py-1.5 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 transition bg-emerald-600/20 text-emerald-300 border-emerald-500/30">
                                 <i data-lucide="crosshair" class="w-3.5 h-3.5"></i> Seguimiento IA
                             </button>
@@ -177,6 +185,9 @@
                                 <i data-lucide="scan" class="w-3.5 h-3.5"></i> Patrullaje
                             </button>
                         </div>
+                        <button id="btnSpotlightTest" onclick="testActiveCameraSpotlight()" class="w-full mb-3 px-2.5 py-1.5 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 transition bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/30" title="Probar encendido óptico silencioso por 5 segundos">
+                            <i data-lucide="lightbulb" class="w-3.5 h-3.5"></i> Probar Flash Óptico (5s)
+                        </button>
 
                         <!-- D-PAD VIRTUAL -->
                         <div class="flex flex-col items-center justify-center my-2">
@@ -588,6 +599,55 @@
                                     <input id="modalCamInitialHoming" type="checkbox" class="accent-blue-500 rounded">
                                     Ejecutar Calibración / Ir a Home al iniciar el sistema
                                 </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SECCIÓN DISUASIÓN ACTIVA / FLASH INTELIGENTE (100% ÓPTICO) -->
+                <div class="p-3.5 bg-dark-900/60 rounded-xl border border-dark-700 space-y-3">
+                    <div class="flex items-center justify-between">
+                        <label class="flex items-center gap-2 text-xs font-bold text-amber-300 cursor-pointer">
+                            <input id="modalCamSpotlightEnabled" type="checkbox" onchange="toggleSpotlightFields(this.checked)" class="accent-amber-500 rounded">
+                            <i data-lucide="zap" class="w-3.5 h-3.5 text-amber-400"></i> Disuasión Activa: Flash / Luz Blanca al Detectar
+                        </label>
+                        <button type="button" id="btnTestSpotlight" onclick="testModalSpotlight()" class="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded text-[11px] font-semibold flex items-center gap-1 transition" title="Probar encendido silencioso del foco por 5 segundos">
+                            <i data-lucide="lightbulb" class="w-3 h-3"></i> Probar Flash (5s)
+                        </button>
+                    </div>
+
+                    <div id="modalSpotlightFields" class="space-y-3 hidden pt-1">
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-300 mb-1">Condición de Activación:</label>
+                                <select id="modalCamSpotlightCondition" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-2.5 py-1.5 text-gray-100">
+                                    <option value="night_only">Solo en Visión Nocturna (IR)</option>
+                                    <option value="always">Siempre que Detecte (Día y Noche)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-300 mb-1">Objetivos a Disuadir:</label>
+                                <select id="modalCamSpotlightTargets" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-2.5 py-1.5 text-gray-100">
+                                    <option value="person">Solo Personas</option>
+                                    <option value="person_vehicle">Personas y Vehículos (Autos, Motos...)</option>
+                                    <option value="all">Cualquier Detección IA</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-300 mb-1">Permanencia de Luz (Cooldown):</label>
+                                <div class="flex items-center gap-1.5">
+                                    <input id="modalCamSpotlightCooldown" type="number" step="1" min="2" max="60" value="8" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-2.5 py-1.5 text-gray-100 font-mono font-bold text-amber-300">
+                                    <span class="text-xs text-gray-400">seg</span>
+                                </div>
+                            </div>
+                            <div class="flex items-center text-[10px] text-gray-400 bg-dark-800/60 p-2 rounded border border-dark-700/60">
+                                <span class="leading-tight">
+                                    <i data-lucide="volume-x" class="w-3.5 h-3.5 text-emerald-400 inline mr-1"></i>
+                                    <strong>100% Óptico y Silencioso:</strong> Solo luz blanca / flash. Cero sonido ni sirenas.
+                                </span>
                             </div>
                         </div>
                     </div>

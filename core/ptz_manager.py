@@ -727,6 +727,13 @@ class PTZManager:
             except Exception:
                 pass
 
+        white_light_status = {"supported": False, "active": False}
+        if self.has_hardware_ptz():
+            try:
+                white_light_status = self.hardware_controller.get_white_light_status()
+            except Exception:
+                pass
+
         return {
             "status": self.status,
             "has_hardware_ptz": self.has_hardware_ptz(),
@@ -738,6 +745,7 @@ class PTZManager:
             "tour_current_idx": self.tour_current_idx,
             "home_preset": self.home_preset,
             "native_status": native_status,
+            "white_light": white_light_status,
             "is_patrolling": self.is_patrolling,
             "is_homing": self.is_homing,
             "homing_stage": self.homing_stage if self.is_homing else "DONE",
@@ -747,5 +755,34 @@ class PTZManager:
             "manual_override_active": now < self.manual_override_until,
             "manual_override_remaining": round(max(0.0, self.manual_override_until - now), 1)
         }
+
+    def set_white_light(self, state: bool) -> bool:
+        """Enciende o apaga el foco óptico / flash de la cámara conectada."""
+        if not self.has_hardware_ptz():
+            return False
+        try:
+            return self.hardware_controller.set_white_light(state)
+        except Exception as e:
+            logger.debug(f"Error conmutando luz blanca en PTZManager: {e}")
+            return False
+
+    def is_white_light_supported(self) -> bool:
+        """Indica si el hardware soporta control óptico de luz blanca."""
+        if not self.has_hardware_ptz():
+            return False
+        try:
+            return bool(self.hardware_controller.get_white_light_status().get("supported", False))
+        except Exception:
+            return False
+
+    def get_white_light_status(self) -> Dict[str, Any]:
+        """Consulta el estado del foco de luz blanca."""
+        if not self.has_hardware_ptz():
+            return {"supported": False, "active": False}
+        try:
+            return self.hardware_controller.get_white_light_status()
+        except Exception:
+            return {"supported": False, "active": False}
+
 
 
