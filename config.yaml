@@ -1,4 +1,4 @@
-cameras:
+cameras: []
 
 storage:
   save_video: false

@@ -482,37 +482,68 @@ async def update_config(req: ConfigUpdateRequest):
                     if name in web_manager.detector.target_classes
                 ]
 
-        # Actualizar parámetros PTZ de cada cámara
-        cams_cfg = new_cfg.get("cameras", [])
+        # Actualizar lista de cámaras dinámicamente en caliente
+        cams_cfg = new_cfg.get("cameras") or []
+        new_cams_ids = {str(c.get("id")) for c in cams_cfg if c.get("id")}
+
+        # 1. Detener y remover nodos eliminados
+        nodes_to_keep = []
+        for node in web_manager.camera_nodes:
+            if node.cam_id not in new_cams_ids:
+                try:
+                    node.stop()
+                    logger.info(f"Cámara '{node.name}' ({node.cam_id}) detenida y removida.")
+                except Exception as ex:
+                    logger.error(f"Error al detener cámara {node.cam_id}: {ex}")
+            else:
+                nodes_to_keep.append(node)
+        web_manager.camera_nodes.clear()
+        web_manager.camera_nodes.extend(nodes_to_keep)
+
+        # 2. Agregar nuevas cámaras o actualizar existentes
         for c_cfg in cams_cfg:
-            cid = c_cfg.get("id")
+            cid = str(c_cfg.get("id"))
             node = web_manager.get_node(cid)
+            if not node:
+                # Cámara nueva agregada desde la interfaz web
+                try:
+                    from core.camera_node import CameraNode
+                    det_cfg = new_cfg.get("detection", {})
+                    new_node = CameraNode(c_cfg, det_cfg)
+                    new_node.start()
+                    web_manager.camera_nodes.append(new_node)
+                    logger.info(f"Nueva cámara '{new_node.name}' ({cid}) iniciada en caliente desde la Web.")
+                    node = new_node
+                except Exception as ex:
+                    logger.error(f"Error al iniciar nueva cámara {cid}: {ex}")
+                    continue
+
             if node:
                 if "frame_skip" in c_cfg:
                     node.frame_skip = max(1, int(c_cfg["frame_skip"]))
                 if "ptz" in c_cfg:
                     ptz_c = c_cfg["ptz"]
                     node.ptz_manager.patrol_speed = float(ptz_c.get("patrol_speed", node.ptz_manager.patrol_speed))
-                node.ptz_manager.sweep_pan_time = float(ptz_c.get("sweep_pan_time_sec", node.ptz_manager.sweep_pan_time))
-                node.ptz_manager.tilt_transition_time = float(ptz_c.get("tilt_transition_time_sec", node.ptz_manager.tilt_transition_time))
-                node.ptz_manager.tilt_speed = float(ptz_c.get("patrol_tilt_speed", node.ptz_manager.tilt_speed))
-                node.ptz_manager.static_target_timeout = float(ptz_c.get("static_target_timeout_sec", node.ptz_manager.static_target_timeout))
-                node.ptz_manager.manual_override_pause_sec = float(ptz_c.get("manual_override_pause_sec", node.ptz_manager.manual_override_pause_sec))
-                if "patrol_enabled" in ptz_c:
-                    node.ptz_manager.patrol_enabled = bool(ptz_c["patrol_enabled"])
-                if "tracking_enabled" in ptz_c:
-                    node.ptz_manager.tracking_enabled = bool(ptz_c["tracking_enabled"])
-                if "positioning_mode" in ptz_c:
-                    node.ptz_manager.positioning_mode = str(ptz_c["positioning_mode"]).lower()
-                if "home_preset" in ptz_c:
-                    node.ptz_manager.home_preset = str(ptz_c["home_preset"])
-                if "patrol_type" in ptz_c:
-                    node.ptz_manager.patrol_type = str(ptz_c["patrol_type"]).lower()
-                if "preset_tour" in ptz_c:
-                    node.ptz_manager.preset_tour = list(ptz_c["preset_tour"])
-                    node.ptz_manager.tour_current_idx = 0
-                    node.ptz_manager.tour_substate = "MOVING"
-                    node.ptz_manager.tour_cmd_sent_time = 0.0
+                    node.ptz_manager.sweep_pan_time = float(ptz_c.get("sweep_pan_time_sec", node.ptz_manager.sweep_pan_time))
+                    node.ptz_manager.tilt_transition_time = float(ptz_c.get("tilt_transition_time_sec", node.ptz_manager.tilt_transition_time))
+                    node.ptz_manager.tilt_speed = float(ptz_c.get("patrol_tilt_speed", node.ptz_manager.tilt_speed))
+                    node.ptz_manager.static_target_timeout = float(ptz_c.get("static_target_timeout_sec", node.ptz_manager.static_target_timeout))
+                    node.ptz_manager.manual_override_pause_sec = float(ptz_c.get("manual_override_pause_sec", node.ptz_manager.manual_override_pause_sec))
+                    if "patrol_enabled" in ptz_c:
+                        node.ptz_manager.patrol_enabled = bool(ptz_c["patrol_enabled"])
+                    if "tracking_enabled" in ptz_c:
+                        node.ptz_manager.tracking_enabled = bool(ptz_c["tracking_enabled"])
+                    if "positioning_mode" in ptz_c:
+                        node.ptz_manager.positioning_mode = str(ptz_c["positioning_mode"]).lower()
+                    if "home_preset" in ptz_c:
+                        node.ptz_manager.home_preset = str(ptz_c["home_preset"])
+                    if "patrol_type" in ptz_c:
+                        node.ptz_manager.patrol_type = str(ptz_c["patrol_type"]).lower()
+                    if "preset_tour" in ptz_c:
+                        node.ptz_manager.preset_tour = list(ptz_c["preset_tour"])
+                        node.ptz_manager.tour_current_idx = 0
+                        node.ptz_manager.tour_substate = "MOVING"
+                        node.ptz_manager.tour_cmd_sent_time = 0.0
 
                 # Actualizar parámetros de Disuasión Óptica / Flash en caliente
                 if "spotlight" in c_cfg:

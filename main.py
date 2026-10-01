@@ -116,10 +116,10 @@ def main():
         camera_nodes.append(node)
     else:
         # Cargar lista de cámaras de config.yaml
-        configured_cameras = config.get("cameras", [])
+        configured_cameras = config.get("cameras") or []
         if not configured_cameras:
             # Compatibilidad hacia atrás si usan video_source de la versión 1
-            old_src = config.get("video_source", {})
+            old_src = config.get("video_source") or {}
             if old_src:
                 configured_cameras = [{
                     "id": "cam_1",
@@ -129,13 +129,17 @@ def main():
                 }]
 
         for c_cfg in configured_cameras:
-            node = CameraNode(c_cfg, det_cfg)
-            node.start()
-            camera_nodes.append(node)
+            if isinstance(c_cfg, dict):
+                node = CameraNode(c_cfg, det_cfg)
+                node.start()
+                camera_nodes.append(node)
 
     if not camera_nodes:
-        logger.error("No se configuraron cámaras válidas para monitorear. Saliendo.")
-        sys.exit(1)
+        if not args.web:
+            logger.error("No se configuraron cámaras en config.yaml. Inicia con --web para configurarlas desde la interfaz web.")
+            sys.exit(1)
+        else:
+            logger.info("ℹ️ No hay cámaras preconfiguradas en config.yaml. Puedes agregarlas desde la interfaz Web.")
 
     # 3. Inicializar Compositor de Mosaico (Grid)
     cell_w = int(disp_cfg.get("cell_width", 640))
@@ -193,8 +197,12 @@ def main():
 
     try:
         while running:
+            if not camera_nodes:
+                time.sleep(0.2)
+                continue
+
             # Procesar cada cámara secuencialmente sobre el frame más reciente
-            for node in camera_nodes:
+            for node in list(camera_nodes):
                 ret, frame = node.read_frame()
                 if ret and frame is not None:
                     node.frame_count += 1
