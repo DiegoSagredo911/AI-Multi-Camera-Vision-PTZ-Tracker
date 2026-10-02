@@ -3,23 +3,28 @@ cameras:
   name: Cámara cam_1
   type: rtsp
   camera_ip: 127.0.0.1
-  rtsp_port: 40154
+  rtsp_port: 57807
   username: admin
-  password: Refugio2017623
+  password: password
   channel: 1
   subtype: 1
   frame_skip: 1
   reconnect_interval_sec: 5
+  tracking_priority:
+  - person
   spotlight:
     enabled: true
     night_only: true
     trigger_classes:
     - person
-    cooldown_sec: 4
+    trigger_delay_sec: 3
+    flash_duration_sec: 5
+    one_shot_per_target: true
+    cooldown_sec: 8
   ptz:
     enabled: auto
     driver: onvif
-    onvif_port: 40154
+    onvif_port: 57807
     patrol_interval_sec: 12
     patrol_type: preset_tour
     preset_tour:
@@ -44,19 +49,41 @@ cameras:
     positioning_mode: native_preset
     home_preset: '1'
     initial_homing: true
+    tracking_priority:
+    - person
+    auto_zoom:
+      enabled: true
+      target_height_ratio_min: 0.18
+      target_height_ratio_max: 0.5
+      zoom_speed: 0.35
+    smoothing:
+      enabled: false
+      alpha: 0.35
+  geofence:
+    enabled: false
+    mode: inclusion
+    points: []
+  event_recording:
+    enabled: false
+    pre_alarm_sec: 3
+    post_alarm_sec: 5
 storage:
   save_video: false
   save_snapshots: false
+security:
+  auth_enabled: false
+  admin_username: admin
+  admin_password: admin123
 detection:
   model_name: yolov8n.pt
   target_classes:
-  - person
-  - car
   - truck
-  - bus
   - motorcycle
-  - dog
   - cat
+  - dog
+  - bus
+  - car
+  - person
   confidence: 0.3
   device: auto
 display:

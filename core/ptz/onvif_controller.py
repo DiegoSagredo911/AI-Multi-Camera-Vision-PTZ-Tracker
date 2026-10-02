@@ -243,7 +243,35 @@ class OnvifPTZController(BasePTZController):
         except Exception as e:
             logger.debug(f"Error al obtener GetDeviceInformation ONVIF: {e}")
 
-        return None
+    def set_white_light(self, state: bool) -> bool:
+        """
+        Enciende o apaga el foco de luz blanca / flash mediante puente Dahua CGI.
+        Permite que cámaras Dahua conectadas vía ONVIF operen el flash de disuasión.
+        """
+        try:
+            if not hasattr(self, "_dahua_cgi") or self._dahua_cgi is None:
+                from .dahua_cgi_controller import DahuaCgiPTZController
+                # Las cámaras Dahua suelen tener la interfaz HTTP en puerto 80 o en el puerto indicado
+                self._dahua_cgi = DahuaCgiPTZController(
+                    ip=self.ip,
+                    port=80,
+                    username=self.username,
+                    password=self.password
+                )
+            success = self._dahua_cgi.set_white_light(state)
+            if not success and self.port != 80:
+                self._dahua_cgi.port = self.port
+                success = self._dahua_cgi.set_white_light(state)
+            return success
+        except Exception as e:
+            logger.debug(f"Error al conmutar luz blanca en ONVIF controller: {e}")
+            return False
+
+    def get_white_light_status(self) -> dict:
+        """Retorna el estado de soporte y activación de luz blanca."""
+        if hasattr(self, "_dahua_cgi") and self._dahua_cgi:
+            return self._dahua_cgi.get_white_light_status()
+        return {"supported": False, "active": False}
 
     def close(self):
         self.stop()

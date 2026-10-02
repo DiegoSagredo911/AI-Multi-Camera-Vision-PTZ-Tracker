@@ -33,7 +33,7 @@ class ObjectDetector:
         """
         self.model_name = model_name
         self.confidence = confidence
-        self.target_classes = target_classes or ["person", "dog", "car"]
+        self.target_classes = [c.lower() for c in (target_classes or ["person", "dog", "car"]) if c]
         self.device = self._resolve_device(device)
 
         logger.info(f"Cargando modelo YOLO '{self.model_name}' en dispositivo '{self.device}'...")
@@ -45,7 +45,7 @@ class ObjectDetector:
         # Obtener mapa de nombres de clase del modelo (COCO)
         self.class_names = self.model.names  # dict: {0: 'person', 16: 'dog', 2: 'car', ...}
         self.target_class_ids = [
-            cid for cid, name in self.class_names.items() if name in self.target_classes
+            cid for cid, name in self.class_names.items() if name.lower() in self.target_classes
         ]
         logger.info(f"Clases monitoreadas: {self.target_classes} (IDs COCO: {self.target_class_ids})")
 
@@ -60,6 +60,14 @@ class ObjectDetector:
 
         # Registro de posiciones anteriores para cálculo de velocidad/movimiento
         self.previous_positions = {}
+
+    def update_target_classes(self, classes: List[str]):
+        """Actualiza dinámicamente las clases monitoreadas por YOLO."""
+        self.target_classes = [c.lower() for c in classes if c]
+        self.target_class_ids = [
+            cid for cid, name in self.class_names.items() if name.lower() in self.target_classes
+        ]
+        logger.info(f"Clases monitoreadas actualizadas: {self.target_classes} (IDs COCO: {self.target_class_ids})")
 
     def _resolve_device(self, device_pref: str) -> str:
         """Determina el dispositivo óptimo de cálculo disponible."""
@@ -157,44 +165,67 @@ class ObjectDetector:
     def select_primary_target(
         self,
         detections: List[Dict[str, Any]],
-        current_target_id: Optional[int] = None
+        current_target_id: Optional[int] = None,
+        priority_classes: Optional[List[str]] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Selecciona el objetivo más adecuado para el seguimiento PTZ:
-        - Si el objetivo actual está quieto/estático y aparece OTRA persona/auto corriendo/moviéndose:
-          ¡Cambia inmediatamente la mira hacia el objetivo en movimiento!
-        - Si el objetivo actual se está moviendo, mantiene el lock.
-        - Prioriza objetivos activos en movimiento sobre objetivos inmóviles.
+        - Si se define 'priority_classes' (ej. ['person', 'car', 'dog']), solo evalúa
+          esas clases y prioriza estrictamente las que aparecen primero en la lista.
+        - Si aparece un objetivo de mayor prioridad (ej. persona vs auto), conmuta
+          inmediatamente al objetivo prioritario.
+        - Dentro del mismo rango de prioridad:
+          * Si el objetivo actual se mueve, mantiene el lock.
+          * Si el objetivo actual se detiene y otro se mueve, cambia al que se mueve.
+          * Prioriza objetivos activos en movimiento y más cercanos al centro.
         """
         if not detections:
             return None
 
-        # Separar en objetivos con movimiento claro (speed >= 5px y no marcados estáticos)
+        # 1. Filtrar por clases permitidas si se especifican
+        candidates = detections
+        if priority_classes:
+            allowed = [c.lower() for c in priority_classes if c]
+            if allowed:
+                candidates = [d for d in detections if d.get("class_name", "").lower() in allowed]
+                if not candidates:
+                    return None
+
+                # Obtener el mejor rango de prioridad presente (0 = máxima prioridad)
+                def get_rank(d):
+                    cls = d.get("class_name", "").lower()
+                    return allowed.index(cls) if cls in allowed else 9999
+
+                min_rank = min(get_rank(d) for d in candidates)
+                # Filtrar solo los candidatos que pertenecen al nivel de mayor prioridad presente
+                candidates = [d for d in candidates if get_rank(d) == min_rank]
+
+        # 2. Separar objetivos con movimiento claro (speed >= 5px y no marcados estáticos)
         moving_targets = [
-            d for d in detections
+            d for d in candidates
             if d.get("speed_px", 0.0) >= 5.0 and not d.get("is_static", False)
         ]
 
-        # Comprobar el estado del objetivo actual que se estaba siguiendo
+        # 3. Comprobar el estado del objetivo actual que se estaba siguiendo
         current_det = None
         if current_target_id is not None and current_target_id != -1:
-            current_det = next((d for d in detections if d["track_id"] == current_target_id), None)
+            current_det = next((d for d in candidates if d["track_id"] == current_target_id), None)
 
-        # REGLA CLAVE: Si el objetivo actual está quieto o estático, pero hay otro objetivo en movimiento rápido:
-        # ¡Priorizar inmediatamente el objetivo en movimiento!
+        # REGLA CLAVE: Si el objetivo actual está quieto o estático, pero hay otro objetivo en movimiento:
+        # ¡Priorizar inmediatamente el objetivo en movimiento dentro de este nivel de prioridad!
         if moving_targets:
             if current_det is None or current_det.get("is_static", False) or current_det.get("speed_px", 0.0) < 4.0:
                 # Seleccionar el objetivo en movimiento más cercano al centro
                 return min(moving_targets, key=lambda d: d["norm_error"][0]**2 + d["norm_error"][1]**2)
 
-        # Si el objetivo actual sigue presente y no está marcado como estático, mantener lock
+        # Si el objetivo actual sigue presente en el rango prioritario y no está estático, mantener lock
         if current_det is not None and not current_det.get("is_static", False):
             return current_det
 
         # En caso general: priorizar objetivos en movimiento si los hay; sino, el más centrado
-        pool = moving_targets if moving_targets else [d for d in detections if not d.get("is_static", False)]
+        pool = moving_targets if moving_targets else [d for d in candidates if not d.get("is_static", False)]
         if not pool:
-            pool = detections
+            pool = candidates
 
         return min(pool, key=lambda d: d["norm_error"][0]**2 + d["norm_error"][1]**2)
 

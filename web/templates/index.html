@@ -92,20 +92,20 @@
                 <button id="tabBtnMonitor" onclick="switchTab('monitor')" class="px-3.5 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 bg-blue-600 text-white shadow">
                     <i data-lucide="layout-grid" class="w-4 h-4"></i> Monitoreo en Vivo
                 </button>
+                <button id="tabBtnEvents" onclick="switchTab('events')" class="px-3.5 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 text-gray-300 hover:text-white hover:bg-dark-600/50">
+                    <i data-lucide="film" class="w-4 h-4"></i> Evidencia (MP4)
+                </button>
                 <button id="tabBtnConfig" onclick="switchTab('config')" class="px-3.5 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 text-gray-300 hover:text-white hover:bg-dark-600/50">
                     <i data-lucide="sliders" class="w-4 h-4"></i> Configuración
                 </button>
             </nav>
 
-            <div class="hidden sm:flex items-center space-x-4 text-xs text-gray-400">
-                <div class="flex items-center gap-1.5 bg-dark-700/40 px-2.5 py-1 rounded border border-dark-600/40">
-                    <i data-lucide="cpu" class="w-3.5 h-3.5 text-blue-400"></i>
-                    <span id="headerFps">FPS: --</span>
-                </div>
-                <div class="flex items-center gap-1.5 bg-dark-700/40 px-2.5 py-1 rounded border border-dark-600/40">
-                    <i data-lucide="users" class="w-3.5 h-3.5 text-emerald-400"></i>
-                    <span id="headerDetections">0 Objetivos</span>
-                </div>
+            <div class="flex items-center space-x-3 text-xs text-gray-400">
+                <!-- Botón de Seguridad / Login -->
+                <button id="btnAuthHeader" onclick="handleAuthButtonClick()" class="px-2.5 py-1 rounded bg-dark-700 hover:bg-dark-600 border border-dark-600 text-gray-200 flex items-center gap-1.5 transition text-xs font-medium">
+                    <i data-lucide="shield" class="w-3.5 h-3.5 text-blue-400"></i>
+                    <span id="authStatusText">Acceso</span>
+                </button>
             </div>
         </div>
     </header>
@@ -262,6 +262,34 @@
 
 
         <!-- ============================================================== -->
+        <!-- PESTAÑA DE CLIPS DE EVIDENCIA (MP4) EN ALERTAS -->
+        <!-- ============================================================== -->
+        <section id="tabContentEvents" class="hidden space-y-4">
+            <div class="bg-dark-800/80 border border-dark-700/70 rounded-xl p-5 shadow-xl">
+                <div class="flex items-center justify-between border-b border-dark-700/60 pb-3 mb-4">
+                    <div>
+                        <h2 class="text-base font-bold text-gray-100 flex items-center gap-2">
+                            <i data-lucide="film" class="w-5 h-5 text-blue-400"></i> Galería de Clips de Evidencia (MP4)
+                        </h2>
+                        <p class="text-xs text-gray-400 mt-0.5">
+                            Grabados automáticamente en memoria RAM (pre-alarma) y disco al dispararse las alertas y luz de advertencia (flash).
+                        </p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button onclick="loadEventsGallery()" class="px-3 py-1.5 bg-dark-700 hover:bg-dark-600 border border-dark-600 text-gray-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition">
+                            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Actualizar
+                        </button>
+                    </div>
+                </div>
+
+                <div id="eventsGalleryContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <p class="text-gray-500 italic text-xs py-8 text-center col-span-full">Cargando clips de evidencia...</p>
+                </div>
+            </div>
+        </section>
+
+
+        <!-- ============================================================== -->
         <!-- PESTAÑA 2: CONFIGURACIÓN DINÁMICA DEL SISTEMA -->
         <!-- ============================================================== -->
         <section id="tabContentConfig" class="hidden space-y-6">
@@ -302,30 +330,38 @@
                         </div>
 
                         <div>
-                            <label class="block text-xs font-semibold text-gray-300 mb-2">Clases Objetivo Monitoreadas:</label>
-                            <div class="grid grid-cols-2 gap-2 text-xs text-gray-300">
-                                <label class="flex items-center gap-2 bg-dark-800/80 p-2 rounded border border-dark-700/60 cursor-pointer">
-                                    <input type="checkbox" value="person" class="cfg-class-checkbox accent-blue-500 rounded"> Persona
+                            <label class="block text-xs font-semibold text-gray-300 mb-1.5">Clases Monitoreadas por la IA:</label>
+                            <div class="grid grid-cols-2 gap-2 bg-dark-800/80 p-2.5 rounded-lg border border-dark-600/70 text-xs">
+                                <label class="flex items-center gap-2 text-gray-200 cursor-pointer">
+                                    <input type="checkbox" value="person" class="cfg-class-checkbox accent-blue-500 rounded">
+                                    <span>Personas (person)</span>
                                 </label>
-                                <label class="flex items-center gap-2 bg-dark-800/80 p-2 rounded border border-dark-700/60 cursor-pointer">
-                                    <input type="checkbox" value="car" class="cfg-class-checkbox accent-blue-500 rounded"> Auto
+                                <label class="flex items-center gap-2 text-gray-200 cursor-pointer">
+                                    <input type="checkbox" value="car" class="cfg-class-checkbox accent-blue-500 rounded">
+                                    <span>Autos (car)</span>
                                 </label>
-                                <label class="flex items-center gap-2 bg-dark-800/80 p-2 rounded border border-dark-700/60 cursor-pointer">
-                                    <input type="checkbox" value="truck" class="cfg-class-checkbox accent-blue-500 rounded"> Camioneta / Camión
+                                <label class="flex items-center gap-2 text-gray-200 cursor-pointer">
+                                    <input type="checkbox" value="motorcycle" class="cfg-class-checkbox accent-blue-500 rounded">
+                                    <span>Motos (motorcycle)</span>
                                 </label>
-                                <label class="flex items-center gap-2 bg-dark-800/80 p-2 rounded border border-dark-700/60 cursor-pointer">
-                                    <input type="checkbox" value="bus" class="cfg-class-checkbox accent-blue-500 rounded"> Bus / Furgón
+                                <label class="flex items-center gap-2 text-gray-200 cursor-pointer">
+                                    <input type="checkbox" value="truck" class="cfg-class-checkbox accent-blue-500 rounded">
+                                    <span>Camiones (truck)</span>
                                 </label>
-                                <label class="flex items-center gap-2 bg-dark-800/80 p-2 rounded border border-dark-700/60 cursor-pointer">
-                                    <input type="checkbox" value="motorcycle" class="cfg-class-checkbox accent-blue-500 rounded"> Moto
+                                <label class="flex items-center gap-2 text-gray-200 cursor-pointer">
+                                    <input type="checkbox" value="bus" class="cfg-class-checkbox accent-blue-500 rounded">
+                                    <span>Buses (bus)</span>
                                 </label>
-                                <label class="flex items-center gap-2 bg-dark-800/80 p-2 rounded border border-dark-700/60 cursor-pointer">
-                                    <input type="checkbox" value="dog" class="cfg-class-checkbox accent-blue-500 rounded"> Perro
+                                <label class="flex items-center gap-2 text-gray-200 cursor-pointer">
+                                    <input type="checkbox" value="dog" class="cfg-class-checkbox accent-blue-500 rounded">
+                                    <span>Perros (dog)</span>
                                 </label>
-                                <label class="flex items-center gap-2 bg-dark-800/80 p-2 rounded border border-dark-700/60 cursor-pointer">
-                                    <input type="checkbox" value="cat" class="cfg-class-checkbox accent-blue-500 rounded"> Gato
+                                <label class="flex items-center gap-2 text-gray-200 cursor-pointer">
+                                    <input type="checkbox" value="cat" class="cfg-class-checkbox accent-blue-500 rounded">
+                                    <span>Gatos (cat)</span>
                                 </label>
                             </div>
+                            <span class="text-[10px] text-gray-400 block mt-1">Se sincronizan automáticamente con las prioridades de tus cámaras.</span>
                         </div>
                     </div>
 
@@ -346,6 +382,32 @@
                                     <span class="text-[11px] text-gray-400 block mt-0.5">Silencia la salida habitual en terminal y sólo imprime advertencias o errores críticos.</span>
                                 </div>
                             </label>
+                        </div>
+                    </div>
+
+                    <!-- SECCIÓN: SEGURIDAD DEL PANEL WEB (CONTROL DE ACCESO) -->
+                    <div class="bg-dark-900/60 border border-dark-700/60 rounded-xl p-5 space-y-4 col-span-full">
+                        <div class="flex items-center justify-between border-b border-dark-700/60 pb-3">
+                            <h3 class="text-sm font-bold text-red-400 uppercase tracking-wider flex items-center gap-2">
+                                <i data-lucide="shield-check" class="w-4 h-4"></i> Seguridad del Panel Web (Autenticación y Control de Acceso)
+                            </h3>
+                            <label class="flex items-center gap-2 text-xs font-semibold text-gray-200 cursor-pointer">
+                                <input id="cfgAuthEnabled" type="checkbox" class="accent-red-500 rounded">
+                                <span>Activar Protección por Contraseña</span>
+                            </label>
+                        </div>
+                        <p class="text-xs text-gray-400">
+                            Protege el panel web y las APIs REST con credenciales de administrador. Si está desactivado, el acceso es libre para la red local.
+                        </p>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-300 mb-1">Usuario Administrador:</label>
+                                <input id="cfgAdminUsername" type="text" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-3 py-2 text-gray-100" value="admin">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-300 mb-1">Contraseña Administrador:</label>
+                                <input id="cfgAdminPassword" type="password" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-3 py-2 text-gray-100" placeholder="Nueva contraseña">
+                            </div>
                         </div>
                     </div>
 
@@ -603,16 +665,32 @@
                                     Ejecutar Calibración / Ir a Home al iniciar el sistema
                                 </label>
                             </div>
+
+                            <!-- OBJETIVOS Y ORDEN DE PRIORIDAD DE SEGUIMIENTO PTZ -->
+                            <div class="pt-2.5 border-t border-dark-700/60 space-y-2">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-[11px] font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                                        <i data-lucide="list-ordered" class="w-3.5 h-3.5"></i> Objetivos y Prioridad de Seguimiento (PTZ):
+                                    </span>
+                                    <span class="text-[10px] text-gray-400">1º = Máxima prioridad</span>
+                                </div>
+                                <p class="text-[11px] text-gray-400 leading-snug">
+                                    Define qué objetos rastrear y su orden jerárquico. Si aparecen varios juntos, la cámara seguirá al de mayor prioridad.
+                                </p>
+                                <div id="modalTrackingPriorityList" class="space-y-1.5 bg-dark-900/60 p-2.5 rounded-lg border border-dark-700/60 max-h-48 overflow-y-auto">
+                                    <!-- Generado dinámicamente con JavaScript -->
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- SECCIÓN DISUASIÓN ACTIVA / FLASH INTELIGENTE (100% ÓPTICO) -->
+                <!-- SECCIÓN LUZ DE ADVERTENCIA (FLASH) / LUZ BLANCA AL DETECTAR -->
                 <div class="p-3.5 bg-dark-900/60 rounded-xl border border-dark-700 space-y-3">
                     <div class="flex items-center justify-between">
                         <label class="flex items-center gap-2 text-xs font-bold text-amber-300 cursor-pointer">
                             <input id="modalCamSpotlightEnabled" type="checkbox" onchange="toggleSpotlightFields(this.checked)" class="accent-amber-500 rounded">
-                            <i data-lucide="zap" class="w-3.5 h-3.5 text-amber-400"></i> Disuasión Activa: Flash / Luz Blanca al Detectar
+                            <i data-lucide="zap" class="w-3.5 h-3.5 text-amber-400"></i> Luz de Advertencia (Flash): Luz Blanca al Detectar
                         </label>
                         <button type="button" id="btnTestSpotlight" onclick="testModalSpotlight()" class="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded text-[11px] font-semibold flex items-center gap-1 transition" title="Probar encendido silencioso del foco por 5 segundos">
                             <i data-lucide="lightbulb" class="w-3 h-3"></i> Probar Flash (5s)
@@ -620,29 +698,98 @@
                     </div>
 
                     <div id="modalSpotlightFields" class="space-y-3 hidden pt-1">
-                        <div class="grid grid-cols-2 gap-3">
-                            <div>
-                                <label class="block text-xs font-semibold text-gray-300 mb-1">Condición de Activación:</label>
-                                <select id="modalCamSpotlightCondition" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-2.5 py-1.5 text-gray-100">
-                                    <option value="night_only">Solo en Visión Nocturna (IR)</option>
-                                    <option value="always">Siempre que Detecte (Día y Noche)</option>
-                                </select>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-300 mb-1">Condición de Activación:</label>
+                            <select id="modalCamSpotlightCondition" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-2.5 py-1.5 text-gray-100">
+                                <option value="night_only">Solo en Visión Nocturna (IR)</option>
+                                <option value="always">Siempre que Detecte (Día y Noche)</option>
+                            </select>
+                        </div>
+
+                        <!-- OBJETIVOS A ADVERTIR MODULARES -->
+                        <div class="space-y-1.5">
+                            <div class="flex items-center justify-between flex-wrap gap-1">
+                                <label class="block text-xs font-semibold text-gray-300 flex items-center gap-1.5">
+                                    <i data-lucide="shield-alert" class="w-3.5 h-3.5 text-amber-400"></i> Objetivos a Advertir (Modular):
+                                </label>
+                                <div class="flex items-center gap-1 text-[10px]">
+                                    <button type="button" onclick="selectSpotlightTargetsPreset('person')" class="px-2 py-0.5 rounded bg-dark-700 hover:bg-dark-600 text-gray-200 transition" title="Solo Personas">Solo Personas</button>
+                                    <button type="button" onclick="selectSpotlightTargetsPreset('vehicles')" class="px-2 py-0.5 rounded bg-dark-700 hover:bg-dark-600 text-gray-200 transition" title="Personas y Vehículos">+ Vehículos</button>
+                                    <button type="button" onclick="selectSpotlightTargetsPreset('all')" class="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 transition" title="Marcar todos">Todos</button>
+                                    <button type="button" onclick="selectSpotlightTargetsPreset('none')" class="px-2 py-0.5 rounded bg-red-900/30 hover:bg-red-900/50 text-red-300 border border-red-700/40 transition" title="Desmarcar todos">Ninguno</button>
+                                </div>
                             </div>
-                            <div>
-                                <label class="block text-xs font-semibold text-gray-300 mb-1">Objetivos a Disuadir:</label>
-                                <select id="modalCamSpotlightTargets" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-2.5 py-1.5 text-gray-100">
-                                    <option value="person">Solo Personas</option>
-                                    <option value="person_vehicle">Personas y Vehículos (Autos, Motos...)</option>
-                                    <option value="all">Cualquier Detección IA</option>
-                                </select>
+                            <p class="text-[11px] text-gray-400 leading-snug">
+                                Selecciona a qué tipos de objetos se aplicará la luz de advertencia (flash) (puedes elegir varios, algunos o ninguno).
+                            </p>
+                            <div id="modalSpotlightTargetsContainer" class="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-xs text-gray-300 pt-0.5">
+                                <label class="flex items-center gap-2 bg-dark-800/80 hover:bg-dark-800 p-2 rounded-lg border border-dark-700/60 cursor-pointer transition">
+                                    <input type="checkbox" value="person" class="spotlight-target-cb accent-amber-500 rounded">
+                                    <span>Personas</span>
+                                </label>
+                                <label class="flex items-center gap-2 bg-dark-800/80 hover:bg-dark-800 p-2 rounded-lg border border-dark-700/60 cursor-pointer transition">
+                                    <input type="checkbox" value="car" class="spotlight-target-cb accent-amber-500 rounded">
+                                    <span>Autos</span>
+                                </label>
+                                <label class="flex items-center gap-2 bg-dark-800/80 hover:bg-dark-800 p-2 rounded-lg border border-dark-700/60 cursor-pointer transition">
+                                    <input type="checkbox" value="motorcycle" class="spotlight-target-cb accent-amber-500 rounded">
+                                    <span>Motos</span>
+                                </label>
+                                <label class="flex items-center gap-2 bg-dark-800/80 hover:bg-dark-800 p-2 rounded-lg border border-dark-700/60 cursor-pointer transition">
+                                    <input type="checkbox" value="truck" class="spotlight-target-cb accent-amber-500 rounded">
+                                    <span>Camiones</span>
+                                </label>
+                                <label class="flex items-center gap-2 bg-dark-800/80 hover:bg-dark-800 p-2 rounded-lg border border-dark-700/60 cursor-pointer transition">
+                                    <input type="checkbox" value="bus" class="spotlight-target-cb accent-amber-500 rounded">
+                                    <span>Buses</span>
+                                </label>
+                                <label class="flex items-center gap-2 bg-dark-800/80 hover:bg-dark-800 p-2 rounded-lg border border-dark-700/60 cursor-pointer transition">
+                                    <input type="checkbox" value="dog" class="spotlight-target-cb accent-amber-500 rounded">
+                                    <span>Perros</span>
+                                </label>
+                                <label class="flex items-center gap-2 bg-dark-800/80 hover:bg-dark-800 p-2 rounded-lg border border-dark-700/60 cursor-pointer transition">
+                                    <input type="checkbox" value="cat" class="spotlight-target-cb accent-amber-500 rounded">
+                                    <span>Gatos</span>
+                                </label>
                             </div>
                         </div>
 
                         <div class="grid grid-cols-2 gap-3">
                             <div>
-                                <label class="block text-xs font-semibold text-gray-300 mb-1">Permanencia de Luz (Cooldown):</label>
+                                <label class="block text-xs font-semibold text-gray-300 mb-1" title="Tiempo que la cámara debe seguir continuamente al objetivo antes de disparar el flash">
+                                    Espera de Seguimiento antes de Flash:
+                                </label>
                                 <div class="flex items-center gap-1.5">
-                                    <input id="modalCamSpotlightCooldown" type="number" step="1" min="2" max="60" value="8" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-2.5 py-1.5 text-gray-100 font-mono font-bold text-amber-300">
+                                    <input id="modalCamSpotlightDelay" type="number" step="0.5" min="0" max="30" value="3" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-2.5 py-1.5 text-gray-100 font-mono font-bold text-amber-300">
+                                    <span class="text-xs text-gray-400">seg</span>
+                                </div>
+                                <span class="text-[10px] text-gray-400">Si sigue por 3s, dispara el flash. 0 = inmediato.</span>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-300 mb-1">Duración del Destello (Flash):</label>
+                                <div class="flex items-center gap-1.5">
+                                    <input id="modalCamSpotlightDuration" type="number" step="0.5" min="0.5" max="30" value="3" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-2.5 py-1.5 text-gray-100 font-mono font-bold text-amber-300">
+                                    <span class="text-xs text-gray-400">seg</span>
+                                </div>
+                                <span class="text-[10px] text-gray-400">Tiempo que el foco permanece encendido.</span>
+                            </div>
+                        </div>
+
+                        <div class="p-2.5 bg-dark-800/80 rounded-lg border border-dark-700/80 space-y-1">
+                            <label class="flex items-center gap-2 text-xs font-semibold text-gray-200 cursor-pointer">
+                                <input id="modalCamSpotlightOneShot" type="checkbox" checked class="accent-amber-500 rounded">
+                                <span>Un solo flash por persona / objetivo mientras se le sigue</span>
+                            </label>
+                            <p class="text-[10px] text-gray-400 pl-5 leading-normal">
+                                La cámara dispara un único destello de advertencia y <strong>sigue rastreando a la persona</strong> sin repetir el flash continuamente.
+                            </p>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3 pt-1">
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-300 mb-1">Cooldown / Enfriamiento:</label>
+                                <div class="flex items-center gap-1.5">
+                                    <input id="modalCamSpotlightCooldown" type="number" step="1" min="2" max="60" value="8" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-2.5 py-1.5 text-gray-100 font-mono font-bold text-gray-300">
                                     <span class="text-xs text-gray-400">seg</span>
                                 </div>
                             </div>
@@ -651,6 +798,114 @@
                                     <i data-lucide="volume-x" class="w-3.5 h-3.5 text-emerald-400 inline mr-1"></i>
                                     <strong>100% Óptico y Silencioso:</strong> Solo luz blanca / flash. Cero sonido ni sirenas.
                                 </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SECCIÓN: AUTO-ZOOM DINÁMICO Y SUAVIZADO PTZ -->
+                    <div class="p-3.5 bg-dark-900/60 rounded-xl border border-dark-700 space-y-3">
+                        <div class="flex items-center justify-between border-b border-dark-700/60 pb-2">
+                            <span class="text-xs font-bold uppercase tracking-wider text-cyan-400 flex items-center gap-1.5">
+                                <i data-lucide="zoom-in" class="w-4 h-4"></i> Auto-Zoom Dinámico & Suavizado PTZ
+                            </span>
+                            <label class="flex items-center gap-2 text-xs font-semibold text-gray-200 cursor-pointer">
+                                <input id="modalCamAutoZoomEnabled" type="checkbox" class="accent-cyan-500 rounded">
+                                <span>Activar Auto-Zoom</span>
+                            </label>
+                        </div>
+                        <p class="text-[11px] text-gray-400 leading-snug">
+                            Ajusta el zoom óptico motorizado automáticamente según la distancia o tamaño del objetivo en el encuadre.
+                        </p>
+                        <div class="grid grid-cols-3 gap-2.5">
+                            <div>
+                                <label class="block text-[11px] font-semibold text-gray-300 mb-1" title="Ratio mínimo de altura (si es menor, acerca)">Zoom In (< Ratio):</label>
+                                <input id="modalCamZoomMinRatio" type="number" step="0.02" min="0.05" max="0.4" value="0.18" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-2 py-1.5 text-gray-100 font-mono">
+                            </div>
+                            <div>
+                                <label class="block text-[11px] font-semibold text-gray-300 mb-1" title="Ratio máximo de altura (si es mayor, aleja)">Zoom Out (> Ratio):</label>
+                                <input id="modalCamZoomMaxRatio" type="number" step="0.02" min="0.25" max="0.8" value="0.50" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-2 py-1.5 text-gray-100 font-mono">
+                            </div>
+                            <div>
+                                <label class="block text-[11px] font-semibold text-gray-300 mb-1">Velocidad Zoom:</label>
+                                <input id="modalCamZoomSpeed" type="number" step="0.05" min="0.1" max="1.0" value="0.35" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-2 py-1.5 text-gray-100 font-mono">
+                            </div>
+                        </div>
+
+                        <!-- Suavizado Amortiguado EMA -->
+                        <div class="pt-2 border-t border-dark-700/60 space-y-2">
+                            <div class="flex items-center justify-between">
+                                <span class="text-[11px] font-semibold text-gray-300 flex items-center gap-1.5">
+                                    <i data-lucide="activity" class="w-3.5 h-3.5 text-blue-400"></i> Suavizado de Movimiento (Filtro EMA):
+                                </span>
+                                <label class="flex items-center gap-1.5 text-xs text-gray-300 cursor-pointer">
+                                    <input id="modalCamSmoothingEnabled" type="checkbox" checked class="accent-blue-500 rounded">
+                                    <span>Activo</span>
+                                </label>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <input id="modalCamSmoothingAlpha" type="range" min="0.1" max="1.0" step="0.05" value="0.35" oninput="document.getElementById('modalCamSmoothingAlphaVal').innerText = this.value" class="w-full h-1.5 bg-dark-700 rounded-lg appearance-none cursor-pointer accent-blue-500">
+                                <span id="modalCamSmoothingAlphaVal" class="font-mono text-xs font-bold text-blue-400 w-8 text-right">0.35</span>
+                            </div>
+                            <span class="text-[10px] text-gray-400 block">Menor = Movimientos más fluidos y amortiguados. Mayor = Reacción más instantánea.</span>
+                        </div>
+                    </div>
+
+                    <!-- SECCIÓN: GEOCERCAS Y ZONAS DE INTERÉS -->
+                    <div class="p-3.5 bg-dark-900/60 rounded-xl border border-dark-700 space-y-3">
+                        <div class="flex items-center justify-between border-b border-dark-700/60 pb-2">
+                            <span class="text-xs font-bold uppercase tracking-wider text-orange-400 flex items-center gap-1.5">
+                                <i data-lucide="pentagon" class="w-4 h-4"></i> Zonas de Interés y Geocercas (Polígono)
+                            </span>
+                            <label class="flex items-center gap-2 text-xs font-semibold text-gray-200 cursor-pointer">
+                                <input id="modalCamGeofenceEnabled" type="checkbox" class="accent-orange-500 rounded">
+                                <span>Activar Geocerca</span>
+                            </label>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3 items-center">
+                            <div>
+                                <label class="block text-[11px] font-semibold text-gray-300 mb-1">Modo de Geocerca:</label>
+                                <select id="modalCamGeofenceMode" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-2.5 py-1.5 text-gray-100">
+                                    <option value="inclusion">Inclusión (Solo rastrear dentro del polígono)</option>
+                                    <option value="exclusion">Exclusión (Ignorar lo que esté dentro)</option>
+                                </select>
+                            </div>
+                            <div class="pt-4">
+                                <button type="button" onclick="openGeofenceDrawingModal()" class="w-full px-3 py-1.5 bg-orange-600/20 hover:bg-orange-600/30 text-orange-300 border border-orange-500/30 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition">
+                                    <i data-lucide="edit-3" class="w-3.5 h-3.5"></i> Dibujar Polígono en Video
+                                </button>
+                            </div>
+                        </div>
+                        <span id="modalCamGeofencePointsInfo" class="text-[10px] text-gray-400 block font-mono">Puntos definidos: 0</span>
+                    </div>
+
+                    <!-- SECCIÓN: GRABACIÓN DE EVIDENCIA EN ALERTAS (MP4) -->
+                    <div class="p-3.5 bg-dark-900/60 rounded-xl border border-dark-700 space-y-3">
+                        <div class="flex items-center justify-between border-b border-dark-700/60 pb-2">
+                            <span class="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                                <i data-lucide="video" class="w-4 h-4"></i> Grabación de Clip Corto de Evidencia (MP4)
+                            </span>
+                            <label class="flex items-center gap-2 text-xs font-semibold text-gray-200 cursor-pointer">
+                                <input id="modalCamRecEnabled" type="checkbox" class="accent-emerald-500 rounded">
+                                <span>Activar Grabación</span>
+                            </label>
+                        </div>
+                        <p class="text-[11px] text-gray-400 leading-snug">
+                            Mantiene un búfer circular en memoria RAM y exporta a MP4 con metadatos JSON únicamente cuando ocurre una alerta o luz de advertencia (flash).
+                        </p>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-300 mb-1">Pre-Alarma en RAM (s):</label>
+                                <div class="flex items-center gap-1.5">
+                                    <input id="modalCamRecPreSec" type="number" step="0.5" min="1" max="10" value="3" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-2.5 py-1.5 text-gray-100 font-mono">
+                                    <span class="text-xs text-gray-400">seg</span>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-300 mb-1">Post-Alarma (s):</label>
+                                <div class="flex items-center gap-1.5">
+                                    <input id="modalCamRecPostSec" type="number" step="0.5" min="1" max="20" value="5" class="w-full bg-dark-800 border border-dark-600 rounded-lg text-xs px-2.5 py-1.5 text-gray-100 font-mono">
+                                    <span class="text-xs text-gray-400">seg</span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -665,6 +920,114 @@
                     <i data-lucide="check" class="w-3.5 h-3.5"></i> Guardar Cámara
                 </button>
             </div>
+        </div>
+    </div>
+
+    <!-- MODAL DE DIBUJO DE GEOCERCA (CANVAS INTERACTIVO SOBRE STREAM) -->
+    <div id="geofenceModal" class="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 hidden">
+        <div class="bg-dark-800 border border-dark-600 rounded-2xl w-full max-w-4xl overflow-hidden shadow-2xl flex flex-col">
+            <div class="px-5 py-3 border-b border-dark-700 flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <i data-lucide="pentagon" class="w-5 h-5 text-orange-400"></i>
+                    <h3 class="text-sm font-bold text-gray-100">Editor de Geocerca y Zonas de Interés</h3>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="clearGeofencePoints()" class="px-2.5 py-1 bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-500/30 rounded text-xs font-semibold flex items-center gap-1 transition">
+                        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Borrar Polígono
+                    </button>
+                    <button onclick="closeGeofenceModal()" class="text-gray-400 hover:text-white p-1 rounded-lg">
+                        <i data-lucide="x" class="w-5 h-5"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="p-4 flex flex-col items-center">
+                <p class="text-xs text-gray-300 mb-2 text-center">
+                    Haz clic sobre la imagen para agregar los vértices del polígono (mínimo 3 puntos). Haz clic cerca del primer punto o pulsa "Completar" para cerrar la figura.
+                </p>
+                <div class="relative inline-block border border-dark-600 rounded-lg overflow-hidden bg-black cursor-crosshair">
+                    <img id="geofenceStreamBg" src="" alt="Stream para Geocerca" class="max-w-full max-h-[55vh] object-contain block select-none pointer-events-none" />
+                    <canvas id="geofenceCanvas" class="absolute inset-0 w-full h-full"></canvas>
+                </div>
+                <div class="mt-3 flex items-center justify-between w-full max-w-lg text-xs text-gray-400">
+                    <span id="geofencePointsCounter">0 vértices trazados</span>
+                    <span class="text-[11px] italic">Coordenadas normalizadas (independientes de resolución)</span>
+                </div>
+            </div>
+
+            <div class="px-5 py-3 bg-dark-900/60 border-t border-dark-700 flex justify-end gap-3">
+                <button onclick="closeGeofenceModal()" class="px-4 py-2 bg-dark-700 hover:bg-dark-600 text-gray-300 rounded-lg text-xs font-semibold transition">
+                    Cancelar
+                </button>
+                <button onclick="applyGeofencePoints()" class="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow transition">
+                    <i data-lucide="check" class="w-3.5 h-3.5"></i> Aplicar a Cámara
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL DE REPRODUCTOR DE CLIPS DE EVIDENCIA (MP4) -->
+    <div id="eventPlayerModal" class="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 hidden">
+        <div class="bg-dark-800 border border-dark-600 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col">
+            <div class="px-5 py-3 border-b border-dark-700 flex items-center justify-between">
+                <div>
+                    <h3 id="eventPlayerTitle" class="text-sm font-bold text-gray-100 flex items-center gap-2">
+                        <i data-lucide="play-circle" class="w-4 h-4 text-blue-400"></i> Clip de Evidencia
+                    </h3>
+                    <p id="eventPlayerSubtitle" class="text-[11px] text-gray-400 font-mono mt-0.5">--</p>
+                </div>
+                <button onclick="closeEventPlayerModal()" class="text-gray-400 hover:text-white p-1 rounded-lg">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <div class="p-4 bg-black flex items-center justify-center">
+                <video id="eventPlayerVideo" controls autoplay class="max-w-full max-h-[60vh] rounded-lg"></video>
+            </div>
+
+            <div class="px-5 py-3 bg-dark-900/60 border-t border-dark-700 flex justify-between items-center text-xs">
+                <div id="eventPlayerDetails" class="text-gray-400">--</div>
+                <div class="flex items-center gap-2">
+                    <a id="eventPlayerDownloadBtn" href="#" download class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-semibold flex items-center gap-1.5 transition">
+                        <i data-lucide="download" class="w-3.5 h-3.5"></i> Descargar MP4
+                    </a>
+                    <button onclick="closeEventPlayerModal()" class="px-3 py-1.5 bg-dark-700 hover:bg-dark-600 text-gray-300 rounded-lg font-semibold transition">
+                        Cerrar
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL DE LOGIN / AUTENTICACIÓN -->
+    <div id="authModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+        <div class="bg-dark-800 border border-dark-600 rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl">
+            <div class="px-5 py-4 border-b border-dark-700 flex items-center justify-between">
+                <h3 class="text-sm font-bold text-gray-100 flex items-center gap-2">
+                    <i data-lucide="lock" class="w-4 h-4 text-blue-400"></i> Iniciar Sesión Administrador
+                </h3>
+                <button onclick="closeAuthModal()" class="text-gray-400 hover:text-white p-1 rounded-lg">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <form onsubmit="submitLogin(event)" class="p-5 space-y-3.5">
+                <div>
+                    <label class="block text-xs font-semibold text-gray-300 mb-1">Usuario:</label>
+                    <input id="loginUsername" type="text" required class="w-full bg-dark-900 border border-dark-600 rounded-lg text-sm px-3 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="admin">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-300 mb-1">Contraseña:</label>
+                    <input id="loginPassword" type="password" required class="w-full bg-dark-900 border border-dark-600 rounded-lg text-sm px-3 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="••••••••">
+                </div>
+                <div class="pt-2 flex justify-end gap-2">
+                    <button type="button" onclick="closeAuthModal()" class="px-3 py-1.5 bg-dark-700 hover:bg-dark-600 text-gray-300 rounded-lg text-xs font-semibold transition">
+                        Cancelar
+                    </button>
+                    <button type="submit" class="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow transition">
+                        <i data-lucide="log-in" class="w-3.5 h-3.5"></i> Acceder
+                    </button>
+                </div>
+            </form>
         </div>
     </div>
 

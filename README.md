@@ -39,14 +39,39 @@ Incorpora una **Interfaz Gráfica Web interactiva (FastAPI + WebSocket)** para m
 - **Optimización CPU: Frame Skipping Configurable (Ideal Servidores / Mini PC):**
   - Salto inteligente de cuadros de inferencia (1x, 2x, 3x, 4x) configurable individualmente por cámara.
   - Reduce el uso de CPU hasta en un **50% a 75%** manteniendo el lazo de seguimiento PTZ fluido y la visualización activa.
-- **Disuasión Activa / Flash Inteligente (Luz Blanca Óptica 100% Silenciosa):**
-  - Enciende automáticamente el foco de luz blanca o flash óptico de la cámara Dahua / PTZ al detectar objetivos.
-  - **Filtro Selectivo por Cámara:** Activación para *Solo Personas*, *Personas y Vehículos* o *Cualquier Detección*.
+- **Selección de Objetos y Orden de Prioridad Jerárquico de Seguimiento (PTZ):**
+  - Configuración modular por cámara de las clases a seguir (`person`, `car`, `motorcycle`, `dog`, etc.).
+  - **Prioridad estricta**: Si conviven varios objetos a la vez, la cámara sigue al de mayor prioridad (ej. 1º Personas > 2º Autos > 3º Motos).
+  - **Conmutación inteligente**: Si la cámara está siguiendo un vehículo y entra una persona al encuadre, conmuta inmediatamente la mira hacia la persona.
+  - Reordenamiento interactivo en el panel web con botones de prioridad `[▲]` `[▼]` y casillas de activación.
+- **Luz de Advertencia (Flash) Inteligente Modular (Luz Blanca Óptica 100% Silenciosa):**
+  - **Espera de Seguimiento antes de Disparar (`trigger_delay_sec`):** La cámara sigue activamente al objetivo y, si lo mantiene en seguimiento durante el tiempo configurado (ej. 3 segundos), activa la luz de advertencia (flash).
+  - **Disparo Único por Persona (`one_shot_per_target`):** El foco destella por la duración establecida (ej. 3 segundos), se apaga automáticamente y la cámara **continúa siguiendo al objetivo sin repetir el flash** de manera infinita.
+  - **Filtro Modular de Objetivos:** Configuración para *Solo Personas*, *Personas y Vehículos*, *Personas, Vehículos y Mascotas* o *Cualquier Detección IA*.
   - **Condición de Visión Nocturna Automática:** Detección instantánea de infrarrojos en RAM por saturación cromática (`HSV`), activando el flash solo de noche o siempre según se configure.
   - **Garantía Silenciosa (Cero Sirenas):** Excluye completamente altavoces y alarmas acústicas, operando de forma 100% óptica.
-  - Temporizador de apagado suave (*Cooldown*) tras la retirada del objetivo y botón de prueba rápida en vivo.
+  - **Feedback en Tiempo Real:** Cuenta regresiva visual en el HUD del video (`[FLASH EN 2.3s]`) y badge animado en la interfaz web.
+  - **Compatibilidad Híbrida ONVIF / Dahua:** Soporta activación óptica directa tanto con driver Dahua CGI como a través del puente auxiliar ONVIF.
+- **Auto-Zoom Dinámico (Encuadre Automático Inteligente):**
+  - Ajusta el zoom óptico/digital automáticamente según la altura relativa del objetivo respecto al fotograma (`target_height_ratio_min` y `max`).
+  - Si una persona se encuentra lejana o pequeña (< 20% del alto), la cámara hace **Zoom In** para capturar detalles faciales; si se acerca demasiado (> 50%), hace **Zoom Out** para evitar perder el seguimiento.
+  - Totalmente parametrizable y activable/desactivable de forma independiente por cámara.
+- **Zonas de Interés y Geocercas (Polígonos Dinámicos en la Web):**
+  - Delimitación de polígonos de detección directamente desde el navegador web mediante un editor visual interactivo con coordenadas normalizadas.
+  - Soporta modos de **Inclusión** (solo detecta y sigue dentro del polígono) y **Exclusión** (ignora calles públicas, veredas transitadas o árboles).
+  - Dibujado visual de la geocerca en el HUD del stream de video y configurable por cámara.
+- **Grabación Automática de Clip Corto de Evidencia (MP4 en RAM) en Alertas:**
+  - Búfer circular en memoria RAM continua (`pre_alarm_sec`, ej: 5s antes del evento) + grabación en tiempo real posterior al disparo (`post_alarm_sec`, ej: 10s).
+  - Al detectar un objetivo configurado o ingresar a la geocerca, genera un archivo MP4 con metadatos JSON detallados.
+  - Reproductor y descargador de evidencias integrado en la pestaña web **Evidencia (MP4)**, con codificación de alta compatibilidad (H.264 / MP4V) sin degradar SSDs en operación normal.
+- **Suavizado de Movimiento PTZ (Control Proporcional Amortiguado / Filtro EMA):**
+  - Filtro de Media Móvil Exponencial (EMA) sobre las velocidades Pan, Tilt y Zoom para eliminar sacudidas mecánicas y tirones bruscos.
+  - Coeficiente de suavizado configurable (`alpha`: 0.1 a 0.9) de forma independiente por cámara para adaptarse a la inercia de cualquier domo.
+- **Seguridad del Panel Web (Autenticación y Control de Acceso):**
+  - Protección perimetral para el panel de control y la API REST mediante autenticación HTTP Digest / Cookies de sesión cifradas.
+  - Activación opcional (`auth_enabled: false` por defecto para retrocompatibilidad) con cambio de usuario y contraseña desde la configuración.
 - **Operación 100% en Memoria RAM (Cero Almacenamiento en Disco):**
-  - El sistema no escribe archivos de video temporales ni degrada discos SSD. La grabación continua queda a cargo del DVR / NVR existente.
+  - El sistema no escribe archivos de video temporales ni degrada discos SSD. La grabación continua queda a cargo del DVR / NVR existente y la evidencia de alertas se captura bajo demanda.
 - **Control de Logs en Consola (Modo Silencioso):**
   - Opción de silenciar logs normales para entornos de producción o servidores headless.
 
@@ -189,26 +214,35 @@ La interfaz web incluye dos paneles principales:
 ### Pestaña 2: Configuración del Sistema
 - **Motor YOLO:** Selección de modelo (`yolov8n.pt`, `yolov8s.pt`), umbral de confianza y activación/desactivación de clases de interés.
 - **Omitir logs en consola:** Casilla para activar o desactivar el modo silencioso de logs en caliente.
-- **Gestión de Cámaras y Parámetros PTZ Independientes (CRUD):**
+- **Seguridad y Acceso al Panel:** Configuración de activación de autenticación, usuario y contraseña de acceso.
+- **Gestión de Cámaras y Parámetros Independientes (CRUD):**
   - **`+ Agregar Cámara`** / **`Editar`**: Ajusta de forma 100% independiente para cada cámara:
-    - **Estrategia de Patrullaje:**
-      * **Barrido Continuo Panorámico (355°):** Paneo fluido con tiempos y velocidades independientes de giro e inclinación.
-      * **Ronda de Presets (Guard Tour):** Lista interactiva de paradas con **tiempo de permanencia (segundos de vigilancia) independiente por cada preset** (ej: Entrada 10s, Estacionamiento 6s, Puerta trasera 12s).
-    - Modo de Posicionamiento: **Nativo (Preset 1 de Cámara)** vs **Temporizado (Barrido por Segundos)**.
-    - Token/ID del Preset Home (por defecto `1`).
-    - Activación inicial de Seguimiento IA y Patrullaje de búsqueda.
-    - Timeout de inmovilidad y pausa de control manual desde la web.
-    - Ejecutar calibración / Ir a Home al iniciar.
+    - **Estrategia de Patrullaje:** Barrido Panorámico (355°) o Ronda de Presets (Guard Tour) con permanencia por parada.
+    - **Prioridad de Seguimiento:** Lista interactiva y jerárquica de clases con botones `[▲]` `[▼]`.
+    - **Luz de Advertencia (Flash):** Foco blanco silencioso con retardo de disparo y destello único por persona.
+    - **Auto-Zoom Dinámico:** Encuadre automático por ratio de altura (`ratio_min`, `ratio_max`, `zoom_speed`).
+    - **Suavizado PTZ:** Filtro de inercia EMA (`alpha`).
+    - **Geocercas y Zonas de Interés:** Activación, modo de inclusión/exclusión y botón de dibujo de polígonos sobre el stream en vivo.
+    - **Grabación de Evidencias:** Activación, segundos pre-alarma en RAM y segundos post-alarma grabados a disco.
   - **`Eliminar`**: Remueve cámaras del sistema.
 
-  - Todos los cambios se guardan permanentemente en `config.yaml`.
+### Pestaña 3: Galería de Evidencias (MP4)
+- **Historial de Clips de Seguridad:** Visualización de clips MP4 grabados automáticamente al activarse las alertas de detección o intrusión en geocercas.
+- **Reproductor de Video Integrado:** Modal interactivo HTML5 para reproducir las grabaciones directamente desde el navegador web.
+- **Metadatos y Descargas:** Cada clip incluye información de cámara, fecha/hora, clase detectada, y opciones para **Descargar MP4** o **Eliminar** archivo.
 
 ---
 
 ## ⚙️ Estructura de Configuración (`config.yaml`)
 
 ```yaml
-# 1. Cámaras Monitoreadas
+# 1. Seguridad del Panel Web y API REST
+security:
+  auth_enabled: false        # true para exigir login web/API, false para acceso abierto
+  admin_username: "admin"
+  admin_password: "admin_password"
+
+# 2. Cámaras Monitoreadas (Configuración 100% Modular e Independiente por Cámara)
 cameras:
   - id: "cam_ptz"
     name: "Cámara PTZ Principal"
@@ -221,11 +255,49 @@ cameras:
     subtype: 1 # 1 = Sub-stream (óptimo para IA), 0 = Main-stream
     frame_skip: 2 # 1 = cada frame, 2 = 1 de cada 2 frames (Ahorro 50% CPU en Mini PC)
     reconnect_interval_sec: 5
+
+    # Zonas de Interés y Geocercas (Polígono Normalizado 0.0 - 1.0)
+    geofence:
+      enabled: false
+      mode: "inclusion"              # "inclusion" (solo dentro) o "exclusion" (ignora dentro)
+      points:                        # Coordenadas del polígono trazado en la web
+        - {x: 0.10, y: 0.20}
+        - {x: 0.90, y: 0.20}
+        - {x: 0.90, y: 0.85}
+        - {x: 0.10, y: 0.85}
+
+    # Grabación Automática de Clip Corto de Evidencia (MP4 en RAM)
+    event_recording:
+      enabled: false                 # Grabar clips cortos solo en eventos
+      pre_alarm_sec: 5.0             # Segundos previos al evento almacenados en RAM continua
+      post_alarm_sec: 10.0           # Segundos de grabación tras activarse el evento
+      cooldown_sec: 30.0             # Enfriamiento para evitar ráfagas duplicadas
+      trigger_classes:
+        - "person"
+
+    # Luz de Advertencia (Flash) Inteligente Modular
+    spotlight:
+      enabled: true                  # Habilitar flash óptico al detectar
+      night_only: true               # Solo en modo noche IR (false = siempre)
+      trigger_classes:               # Clases a advertir
+        - "person"
+      trigger_delay_sec: 3.0         # Segundos de seguimiento continuo antes de disparar el flash
+      flash_duration_sec: 3.0        # Duración del destello encendido
+      one_shot_per_target: true      # Un solo flash por objetivo mientras se le sigue
+      cooldown_sec: 8.0              # Tiempo de enfriamiento
+
+    # Orden de Prioridad Jerárquico de Seguimiento
+    tracking_priority:
+      - "person"                     # Prioridad 1: Personas
+      - "car"                        # Prioridad 2: Autos
+      - "motorcycle"                 # Prioridad 3: Motos
+      - "dog"                        # Prioridad 4: Perros
+
     ptz:
       enabled: "auto"        # "auto" detecta motores PTZ; false para cámara fija
       driver: "onvif"        # "onvif" o "dahua_cgi"
       onvif_port: 57858
-      positioning_mode: "native_preset" # "native_preset" (Usa Preset 1 nativo) o "time_based"
+      positioning_mode: "native_preset" # "native_preset" o "time_based"
       home_preset: "1"       # Identificador de Preset Home en la cámara
       tracking_enabled: true # Habilitar seguimiento motorizado IA para esta cámara
       patrol_enabled: true   # Habilitar patrullaje de búsqueda en reposo
@@ -242,7 +314,7 @@ cameras:
       homing_tilt_duration_sec: 2.5  # Segundos para tope arriba (si usa modo time_based)
       patrol_interval_sec: 12        # Espera sin eventos antes de salir a patrullar
       patrol_speed: 0.35             # Velocidad horizontal
-      panoramic_patrol: true         # Patrulla horizontal + inclinación vertical (si patrol_type = panoramic)
+      panoramic_patrol: true         # Patrulla horizontal + inclinación vertical
       sweep_pan_time_sec: 14.0       # Tiempo para recorrer los 355° de extremo a extremo
       tilt_transition_time_sec: 3.0  # Tiempo de inclinación vertical hacia la calle
       patrol_tilt_speed: 0.35        # Velocidad de inclinación vertical
@@ -252,14 +324,25 @@ cameras:
       static_target_timeout_sec: 3.0 # Segundos inmóvil antes de continuar patrullando
       manual_override_pause_sec: 1.0 # Pausa tras mover con controles web
 
+      # Auto-Zoom Dinámico (Encuadre Automático)
+      auto_zoom:
+        enabled: false
+        target_height_ratio_min: 0.20 # Si altura < 20% del frame -> Zoom In
+        target_height_ratio_max: 0.50 # Si altura > 50% del frame -> Zoom Out
+        zoom_speed: 0.35              # Velocidad óptica de zoom
 
+      # Suavizado de Movimiento PTZ (Control Amortiguado EMA)
+      smoothing:
+        enabled: true
+        alpha: 0.30                   # Coeficiente EMA (0.1 suave, 1.0 instantáneo)
 
-# 2. Política de Almacenamiento (Cero Almacenamiento en Disco)
+# 3. Política de Almacenamiento
 storage:
   save_video: false
   save_snapshots: false
+  events_dir: "recordings/events"
 
-# 3. Motor IA (YOLO)
+# 4. Motor IA (YOLO)
 detection:
   model_name: "yolov8n.pt"
   target_classes:
@@ -272,7 +355,7 @@ detection:
   confidence: 0.30
   device: "auto"             # "auto", "mps" (Mac), "cuda" o "cpu"
 
-# 4. Visualización en Pantalla Local
+# 5. Visualización en Pantalla Local
 display:
   show_window: true
   window_title: "AI Multi-Camera Vision & PTZ Tracker"
@@ -280,7 +363,7 @@ display:
   cell_height: 360
   draw_hud: true
 
-# 5. Configuración de Logs en Consola
+# 6. Configuración de Logs en Consola
 logging:
   quiet: false               # true para suprimir logs en consola (sólo errores)
   level: "INFO"              # "DEBUG", "INFO", "WARNING", "ERROR"

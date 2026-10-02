@@ -13,6 +13,9 @@ import cv2
 
 from .stream import VideoStream
 from .ptz_manager import PTZManager
+from .spotlight_manager import SpotlightManager
+from .geofence import GeofenceManager
+from .event_recorder import EventRecorder
 
 logger = logging.getLogger("CameraNode")
 
@@ -48,6 +51,15 @@ class CameraNode:
         }
         self.ptz_manager = PTZManager(ptz_cfg, camera_auth)
 
+        # Configuración de Objetos a Seguir con Orden de Prioridad PTZ
+        raw_priority = ptz_cfg.get(
+            "tracking_priority",
+            cam_config.get("tracking_priority", global_detection_config.get("target_classes", ["person", "car", "motorcycle", "dog"]))
+        )
+        if isinstance(raw_priority, str):
+            raw_priority = [raw_priority]
+        self.tracking_priority: list = list(raw_priority)
+
         # Estado interno de tracking
         self.lock = threading.Lock()
         self.current_target_id: Optional[int] = None
@@ -63,19 +75,59 @@ class CameraNode:
         self.frame_skip: int = max(1, int(cam_config.get("frame_skip", global_detection_config.get("frame_skip", 1))))
         self.frame_count: int = 0
 
-        # Configuración de Disuasión Activa / Flash Inteligente (Luz Blanca Óptica)
+        # Controlador Modular de Luz de Advertencia (Flash) Inteligente (Luz Blanca Óptica)
         spotlight_cfg = cam_config.get("spotlight", {})
-        self.spotlight_enabled: bool = bool(spotlight_cfg.get("enabled", False))
-        self.spotlight_night_only: bool = bool(spotlight_cfg.get("night_only", True))
-        raw_targets = spotlight_cfg.get("trigger_classes", ["person"])
-        if isinstance(raw_targets, str):
-            raw_targets = [raw_targets]
-        self.spotlight_targets: list = list(raw_targets)
-        self.spotlight_cooldown: float = float(spotlight_cfg.get("cooldown_sec", 8.0))
-        self.spotlight_active: bool = False
-        self.spotlight_off_time: float = 0.0
+        self.spotlight = SpotlightManager(self.name, spotlight_cfg)
         self.is_night_vision: bool = False
         self.saturation_mean: float = 50.0
+
+        # Gestor de Geocercas y Polígonos de Detección por Cámara
+        geofence_cfg = cam_config.get("geofence", {})
+        self.geofence = GeofenceManager(geofence_cfg)
+
+        # Grabador Automático de Clips de Evidencia (RAM + MP4) por Cámara
+        rec_cfg = cam_config.get("event_recording", {})
+        self.event_recorder = EventRecorder(self.cam_id, self.name, rec_cfg)
+
+    @property
+    def spotlight_active(self) -> bool:
+        return self.spotlight.is_flashing
+
+    @spotlight_active.setter
+    def spotlight_active(self, val: bool):
+        self.spotlight.is_flashing = bool(val)
+
+    @property
+    def spotlight_enabled(self) -> bool:
+        return self.spotlight.enabled
+
+    @spotlight_enabled.setter
+    def spotlight_enabled(self, val: bool):
+        self.spotlight.enabled = bool(val)
+
+    @property
+    def spotlight_targets(self) -> list:
+        return self.spotlight.trigger_classes
+
+    @spotlight_targets.setter
+    def spotlight_targets(self, val: list):
+        self.spotlight.trigger_classes = list(val)
+
+    @property
+    def spotlight_night_only(self) -> bool:
+        return self.spotlight.night_only
+
+    @spotlight_night_only.setter
+    def spotlight_night_only(self, val: bool):
+        self.spotlight.night_only = bool(val)
+
+    @property
+    def spotlight_cooldown(self) -> float:
+        return self.spotlight.cooldown_sec
+
+    @spotlight_cooldown.setter
+    def spotlight_cooldown(self, val: float):
+        self.spotlight.cooldown_sec = float(val)
 
     def _resolve_source(self, cfg: Dict[str, Any]):
         """Construye la URL o fuente para este nodo de cámara."""
@@ -129,52 +181,12 @@ class CameraNode:
         except Exception:
             return self.is_night_vision
 
-    def _evaluate_spotlight(self, detections: list):
+    def _evaluate_spotlight(self, detections: list, primary_target: Optional[dict] = None):
         """
-        Evalúa si las detecciones actuales deben disparar o mantener la luz blanca / flash óptico.
-        Respeta la condición de visión nocturna y el filtro de objetivos (personas, vehículos, etc.).
-        Garantizado: Cero alarmas de sonido ni sirenas.
+        Evalúa disuasión óptica modular: retardo de seguimiento (3s), destello y disparo único por objetivo.
         """
-        now = time.time()
-        if not self.spotlight_enabled or not self.ptz_manager.has_hardware_ptz():
-            if self.spotlight_active:
-                self.ptz_manager.set_white_light(False)
-                self.spotlight_active = False
-            return
-
-        # 1. Comprobar condición de noche
-        night_condition_met = (not self.spotlight_night_only) or self.is_night_vision
-
-        # 2. Comprobar si hay algún objetivo que coincida con el filtro
-        matching_target = False
-        if night_condition_met and detections:
-            vehicle_classes = {"car", "truck", "bus", "motorcycle"}
-            for d in detections:
-                cls_name = d.get("class_name", "")
-                if "all" in self.spotlight_targets:
-                    matching_target = True
-                    break
-                if cls_name in self.spotlight_targets:
-                    matching_target = True
-                    break
-                if "vehicles" in self.spotlight_targets and cls_name in vehicle_classes:
-                    matching_target = True
-                    break
-
-        # 3. Disparar encendido o prolongar cooldown
-        if matching_target:
-            self.spotlight_off_time = now + self.spotlight_cooldown
-            if not self.spotlight_active:
-                success = self.ptz_manager.set_white_light(True)
-                if success:
-                    self.spotlight_active = True
-                    logger.info(f"[{self.name}] Disuasión Óptica ACTIVADA por detección.")
-        else:
-            # No hay objetivos válidos presentes
-            if self.spotlight_active and now >= self.spotlight_off_time:
-                self.ptz_manager.set_white_light(False)
-                self.spotlight_active = False
-                logger.info(f"[{self.name}] Disuasión Óptica APAGADA tras cooldown de {self.spotlight_cooldown}s.")
+        target = primary_target if primary_target is not None else self.last_primary_target
+        return self.spotlight.evaluate(detections, target, self.is_night_vision, self.ptz_manager)
 
     def update_cycle(self, frame: np.ndarray, detections: list, primary_target: Optional[dict], detector):
         """
@@ -194,14 +206,21 @@ class CameraNode:
         else:
             self.current_target_id = None
 
+        # Alimentar búfer circular RAM del grabador de evidencia
+        self.event_recorder.push_frame(frame)
+
         # Detectar visión nocturna en RAM
         self._check_night_vision(frame)
 
-        # Evaluar disuasión óptica / flash
-        self._evaluate_spotlight(detections)
+        # Evaluar luz de advertencia (flash) modular
+        was_flashing_before = self.spotlight.is_flashing
+        self._evaluate_spotlight(detections, primary_target)
+        # Si se acaba de disparar la luz de advertencia (flash), disparar clip de evidencia
+        if not was_flashing_before and self.spotlight.is_flashing:
+            self.event_recorder.trigger_event("ADVERTENCIA_FLASH", primary_target)
 
-        # Actualizar lazo PTZ independiente
-        self.ptz_manager.update(primary_target)
+        # Actualizar lazo PTZ independiente con frame_shape para auto-zoom dinámico
+        self.ptz_manager.update(primary_target, frame_shape=frame.shape[:2])
 
         # Aplicar PTZ digital si está configurado para esta cámara
         processed_frame = frame
@@ -209,7 +228,7 @@ class CameraNode:
             target_center = primary_target["center"] if primary_target else None
             processed_frame = self.ptz_manager.digital_controller.apply(frame, target_center)
 
-        # Anotar frame con HUD específico de esta cámara
+        # Anotar frame con HUD específico de esta cámara y geocerca
         annotated = self._draw_node_hud(
             processed_frame,
             detections,
@@ -233,11 +252,17 @@ class CameraNode:
             self.fps = 0.9 * self.fps + 0.1 * (1.0 / dt)
         self.prev_time = now
 
-        # Mantener seguimiento PTZ activo con el objetivo prioritario actual
-        self.ptz_manager.update(self.last_primary_target)
+        # Alimentar búfer circular RAM del grabador de evidencia
+        self.event_recorder.push_frame(frame)
 
-        # Evaluar disuasión óptica / flash también en frames saltados
-        self._evaluate_spotlight(self.last_detections)
+        # Mantener seguimiento PTZ activo con el objetivo prioritario actual
+        self.ptz_manager.update(self.last_primary_target, frame_shape=frame.shape[:2])
+
+        # Evaluar luz de advertencia (flash) también en frames saltados
+        was_flashing_before = self.spotlight.is_flashing
+        self._evaluate_spotlight(self.last_detections, self.last_primary_target)
+        if not was_flashing_before and self.spotlight.is_flashing:
+            self.event_recorder.trigger_event("ADVERTENCIA_FLASH", self.last_primary_target)
 
         # Aplicar PTZ digital si está activo
         processed_frame = frame
@@ -257,22 +282,29 @@ class CameraNode:
             self.last_jpeg_bytes = None
 
     def _draw_node_hud(self, frame: np.ndarray, detections: list, primary_target: Optional[dict], detector) -> np.ndarray:
-        """Dibuja la información de la cámara y las detecciones."""
+        """Dibuja la información de la cámara, geocercas y detecciones."""
+        # Dibujar polígono de geocerca sobre el frame si está habilitado
+        frame_with_poly = self.geofence.draw_polygon(frame)
+
         canvas = detector.draw_hud(
-            frame,
+            frame_with_poly,
             detections=detections,
             primary_target=primary_target,
             ptz_status=self.ptz_manager.status,
             fps=self.fps
         )
 
-        # Añadir cintillo con el nombre del canal, estado Noche y Flash
+        # Añadir cintillo con el nombre del canal, estado Noche, Flash y cuenta regresiva
         h, w = canvas.shape[:2]
         badges = [f"[{self.name}]"]
         if self.is_night_vision:
             badges.append("[IR NOCHE]")
-        if self.spotlight_active:
+        if self.spotlight.is_flashing:
             badges.append("[FLASH ON]")
+        elif self.spotlight.is_dwelling:
+            badges.append(f"[FLASH EN {self.spotlight.dwell_remaining:.1f}s]")
+        if self.geofence.enabled:
+            badges.append(f"[GEO:{self.geofence.mode[:3].upper()}]")
         badge_text = " ".join(badges)
 
         cv2.putText(
@@ -337,16 +369,15 @@ class CameraNode:
             "is_connected": self.stream.is_connected,
             "fps": round(self.fps, 1),
             "frame_skip": self.frame_skip,
+            "tracking_priority": self.tracking_priority,
             "ptz": self.ptz_manager.get_state_dict(),
             "spotlight": {
-                "enabled": self.spotlight_enabled,
-                "active": self.spotlight_active,
+                **self.spotlight.get_telemetry(),
                 "is_night": self.is_night_vision,
-                "night_only": self.spotlight_night_only,
-                "trigger_classes": self.spotlight_targets,
-                "cooldown_sec": self.spotlight_cooldown,
                 "supported": self.ptz_manager.is_white_light_supported()
             },
+            "geofence": self.geofence.get_config_dict(),
+            "event_recording": self.event_recorder.get_config_dict(),
             "detections_count": len(dets),
             "detections": dets,
             "primary_target_id": primary_id

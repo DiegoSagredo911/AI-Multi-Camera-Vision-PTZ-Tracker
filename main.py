@@ -90,9 +90,22 @@ def main():
 
     # 1. Inicializar Motor IA Compartido en Memoria
     logger.info("Inicializando Motor IA (YOLOv8) compartido en memoria...")
+    configured_cameras = config.get("cameras") or []
+    initial_classes = set(det_cfg.get("target_classes") or ["person", "car", "motorcycle", "truck", "bus", "dog", "cat"])
+    for c_cfg in configured_cameras:
+        if isinstance(c_cfg, dict):
+            pri = c_cfg.get("tracking_priority") or (c_cfg.get("ptz", {}).get("tracking_priority") if isinstance(c_cfg.get("ptz"), dict) else None)
+            if pri and isinstance(pri, list):
+                initial_classes.update(pri)
+            spot = c_cfg.get("spotlight", {})
+            if isinstance(spot, dict):
+                trig = spot.get("trigger_classes")
+                if trig and isinstance(trig, list):
+                    initial_classes.update([t for t in trig if t not in ("all", "vehicles", "animals")])
+
     detector = ObjectDetector(
         model_name=det_cfg.get("model_name", "yolov8n.pt"),
-        target_classes=det_cfg.get("target_classes", ["person", "dog", "car"]),
+        target_classes=list(initial_classes),
         confidence=float(det_cfg.get("confidence", 0.40)),
         device=det_cfg.get("device", "auto")
     )
@@ -211,12 +224,17 @@ def main():
                     if (node.frame_count % node.frame_skip) == 0:
                         # Inferencia YOLO con tracking temporal
                         detections = detector.detect_and_track(frame)
-                        # Selección del objetivo prioritario
+                        # Filtrar detecciones según la geocerca de esta cámara si está activa
+                        h, w = frame.shape[:2]
+                        filtered_detections = node.geofence.filter_detections(detections, w, h)
+                        # Selección del objetivo prioritario según orden de prioridad configurado
                         primary_target = detector.select_primary_target(
-                            detections, node.current_target_id
+                            filtered_detections,
+                            node.current_target_id,
+                            priority_classes=node.tracking_priority
                         )
                         # Actualizar estado, lazo PTZ y HUD del nodo
-                        node.update_cycle(frame, detections, primary_target, detector)
+                        node.update_cycle(frame, filtered_detections, primary_target, detector)
                     else:
                         # Cuadro saltado: actualiza PTZ y HUD reutilizando estado previo (Ahorro CPU)
                         node.update_skipped_cycle(frame, detector)

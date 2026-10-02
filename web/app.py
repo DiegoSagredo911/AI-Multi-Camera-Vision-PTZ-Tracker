@@ -12,7 +12,8 @@ from typing import List, Dict, Any, Optional
 import yaml
 import cv2
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
+import json
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -32,6 +33,15 @@ class SpotlightControlRequest(BaseModel):
 
 class ConfigUpdateRequest(BaseModel):
     config: Dict[str, Any]
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class GeofenceUpdateRequest(BaseModel):
+    enabled: bool = False
+    mode: str = "inclusion"
+    points: List[Dict[str, float]] = []
 
 
 class WebManager:
@@ -64,10 +74,46 @@ BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
+# Middleware para seguridad del panel web (si está habilitado en config)
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    # Obtener configuración de seguridad
+    sec_cfg = web_manager.config_data.get("security", {})
+    auth_enabled = bool(sec_cfg.get("auth_enabled", False))
+
+    if auth_enabled:
+        # Rutas exentas de autenticación (archivos estáticos, endpoint de login y favicon)
+        path = request.url.path
+        if not (path.startswith("/static") or path == "/api/login" or path == "/favicon.ico"):
+            auth_token = request.cookies.get("session_auth")
+            # El token válido es la clave secreta o token firmado
+            valid_user = sec_cfg.get("admin_username", "admin")
+            valid_pass = sec_cfg.get("admin_password", "admin123")
+            import hashlib
+            expected_token = hashlib.sha256(f"{valid_user}:{valid_pass}".encode()).hexdigest()
+
+            if auth_token != expected_token:
+                # Si es una petición a la API REST, retornar 401 Unauthorized
+                if path.startswith("/api/"):
+                    return JSONResponse(status_code=401, content={"detail": "No autenticado. Inicie sesión."})
+                # Si es una página web, renderizar vista o permitir index con bandera auth_required
+                pass
+
+    response = await call_next(request)
+    return response
+
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """Página principal del Dashboard de Monitoreo."""
+    sec_cfg = web_manager.config_data.get("security", {})
+    auth_enabled = bool(sec_cfg.get("auth_enabled", False))
+    valid_user = sec_cfg.get("admin_username", "admin")
+    valid_pass = sec_cfg.get("admin_password", "admin123")
+    import hashlib
+    expected_token = hashlib.sha256(f"{valid_user}:{valid_pass}".encode()).hexdigest()
+    is_authenticated = (not auth_enabled) or (request.cookies.get("session_auth") == expected_token)
+
     cams = [
         {
             "id": node.cam_id,
@@ -81,7 +127,9 @@ async def index(request: Request):
         name="index.html",
         context={
             "cameras": cams,
-            "total_cameras": len(cams)
+            "total_cameras": len(cams),
+            "auth_enabled": auth_enabled,
+            "is_authenticated": is_authenticated
         }
     )
 
@@ -337,15 +385,7 @@ async def ptz_control_spotlight(cam_id: str, req: SpotlightControlRequest):
         raise HTTPException(status_code=400, detail="La cámara no cuenta con hardware PTZ/CGI configurable")
 
     if req.test:
-        success = node.ptz_manager.set_white_light(True)
-        node.spotlight_active = True
-
-        async def turn_off_later(sec: float):
-            await asyncio.sleep(sec)
-            node.ptz_manager.set_white_light(False)
-            node.spotlight_active = False
-
-        asyncio.create_task(turn_off_later(req.duration_sec))
+        success = node.spotlight.trigger_test(req.duration_sec, node.ptz_manager)
         return {
             "success": success,
             "cam_id": cam_id,
@@ -355,7 +395,7 @@ async def ptz_control_spotlight(cam_id: str, req: SpotlightControlRequest):
 
     target_state = bool(req.state)
     success = node.ptz_manager.set_white_light(target_state)
-    node.spotlight_active = target_state
+    node.spotlight.is_flashing = target_state
     return {
         "success": success,
         "cam_id": cam_id,
@@ -466,21 +506,36 @@ async def update_config(req: ConfigUpdateRequest):
     """Actualiza y guarda la configuración en config.yaml, aplicando cambios dinámicos."""
     try:
         new_cfg = req.config
+
+        # Determinar conjunto completo de clases requeridas sumando cámaras y config global
+        det_cfg = new_cfg.get("detection", {})
+        cams_cfg = new_cfg.get("cameras") or []
+        all_classes = set(det_cfg.get("target_classes") or ["person", "car", "motorcycle", "truck", "bus", "dog", "cat"])
+        for c in cams_cfg:
+            if isinstance(c, dict):
+                pri = c.get("tracking_priority") or (c.get("ptz", {}).get("tracking_priority") if isinstance(c.get("ptz"), dict) else None)
+                if pri and isinstance(pri, list):
+                    all_classes.update(pri)
+                spot = c.get("spotlight", {})
+                if isinstance(spot, dict):
+                    trig = spot.get("trigger_classes")
+                    if trig and isinstance(trig, list):
+                        all_classes.update([t for t in trig if t not in ("all", "vehicles", "animals")])
+
+        if "detection" not in new_cfg:
+            new_cfg["detection"] = {}
+        new_cfg["detection"]["target_classes"] = list(all_classes)
+
         with open(web_manager.config_path, "w", encoding="utf-8") as f:
             yaml.dump(new_cfg, f, allow_unicode=True, sort_keys=False)
 
         web_manager.config_data = new_cfg
 
-        # Actualizar en caliente los parámetros aplicables a los nodos en ejecución
-        det_cfg = new_cfg.get("detection", {})
-        if web_manager.detector and det_cfg:
-            web_manager.detector.confidence = float(det_cfg.get("confidence", 0.30))
-            if "target_classes" in det_cfg:
-                web_manager.detector.target_classes = det_cfg["target_classes"]
-                web_manager.detector.target_class_ids = [
-                    cid for cid, name in web_manager.detector.class_names.items()
-                    if name in web_manager.detector.target_classes
-                ]
+        # Actualizar en caliente los parámetros aplicables al detector en ejecución
+        if web_manager.detector:
+            if det_cfg:
+                web_manager.detector.confidence = float(det_cfg.get("confidence", 0.30))
+            web_manager.detector.update_target_classes(list(all_classes))
 
         # Actualizar lista de cámaras dinámicamente en caliente
         cams_cfg = new_cfg.get("cameras") or []
@@ -519,6 +574,44 @@ async def update_config(req: ConfigUpdateRequest):
                     continue
 
             if node:
+                if "name" in c_cfg:
+                    node.name = str(c_cfg["name"])
+
+                # Reiniciar stream si cambió la IP, credenciales, puerto o canal RTSP
+                new_src = node._resolve_source(c_cfg)
+                if new_src != node.video_source:
+                    try:
+                        logger.info(f"Actualizando fuente de video en caliente para '{node.name}'...")
+                        node.stream.stop()
+                        node.video_source = new_src
+                        from core.stream import VideoStream
+                        node.stream = VideoStream(node.video_source, reconnect_interval=node.reconnect_sec)
+                        node.stream.start()
+                    except Exception as ex:
+                        logger.error(f"Error al reconectar stream en caliente para '{node.name}': {ex}")
+
+                # Reiniciar controlador PTZ si cambiaron las credenciales o el driver/puerto
+                ptz_c = c_cfg.get("ptz", {})
+                new_auth = {
+                    "camera_ip": c_cfg.get("camera_ip", "192.168.1.108"),
+                    "username": c_cfg.get("username", "admin"),
+                    "password": c_cfg.get("password", ""),
+                    "channel": c_cfg.get("channel", 1)
+                }
+                new_driver = ptz_c.get("driver", "onvif")
+                new_port = ptz_c.get("onvif_port", 80)
+                old_port = node.ptz_manager.config.get("onvif_port", 80)
+                if (new_auth != getattr(node.ptz_manager, "auth", {}) or
+                    new_driver != getattr(node.ptz_manager, "driver_type", "onvif") or
+                    new_port != old_port):
+                    try:
+                        logger.info(f"Actualizando conexión PTZ en caliente para '{node.name}'...")
+                        node.ptz_manager.stop()
+                        from core.ptz_manager import PTZManager
+                        node.ptz_manager = PTZManager(ptz_c, new_auth)
+                    except Exception as ex:
+                        logger.error(f"Error al reconectar PTZ en caliente para '{node.name}': {ex}")
+
                 if "frame_skip" in c_cfg:
                     node.frame_skip = max(1, int(c_cfg["frame_skip"]))
                 if "ptz" in c_cfg:
@@ -545,16 +638,38 @@ async def update_config(req: ConfigUpdateRequest):
                         node.ptz_manager.tour_substate = "MOVING"
                         node.ptz_manager.tour_cmd_sent_time = 0.0
 
+                # Actualizar orden de prioridad de seguimiento de objetivos
+                if "tracking_priority" in c_cfg:
+                    node.tracking_priority = list(c_cfg["tracking_priority"])
+                elif "ptz" in c_cfg and "tracking_priority" in c_cfg["ptz"]:
+                    node.tracking_priority = list(c_cfg["ptz"]["tracking_priority"])
+
                 # Actualizar parámetros de Disuasión Óptica / Flash en caliente
                 if "spotlight" in c_cfg:
                     sc = c_cfg["spotlight"]
-                    node.spotlight_enabled = bool(sc.get("enabled", False))
-                    node.spotlight_night_only = bool(sc.get("night_only", True))
-                    raw_targets = sc.get("trigger_classes", ["person"])
-                    if isinstance(raw_targets, str):
-                        raw_targets = [raw_targets]
-                    node.spotlight_targets = list(raw_targets)
-                    node.spotlight_cooldown = float(sc.get("cooldown_sec", 8.0))
+                    node.spotlight.update_config(sc)
+
+                # Actualizar parámetros de Geocercas en caliente
+                if "geofence" in c_cfg:
+                    node.geofence.update_config(c_cfg["geofence"])
+
+                # Actualizar parámetros de Grabación de Evidencia en caliente
+                if "event_recording" in c_cfg:
+                    node.event_recorder.update_config(c_cfg["event_recording"])
+
+                # Actualizar parámetros de Auto-Zoom Dinámico en caliente
+                if "ptz" in c_cfg and "auto_zoom" in c_cfg["ptz"]:
+                    az = c_cfg["ptz"]["auto_zoom"]
+                    node.ptz_manager.auto_zoom_enabled = bool(az.get("enabled", node.ptz_manager.auto_zoom_enabled))
+                    node.ptz_manager.target_height_ratio_min = float(az.get("target_height_ratio_min", node.ptz_manager.target_height_ratio_min))
+                    node.ptz_manager.target_height_ratio_max = float(az.get("target_height_ratio_max", node.ptz_manager.target_height_ratio_max))
+                    node.ptz_manager.zoom_speed = float(az.get("zoom_speed", node.ptz_manager.zoom_speed))
+
+                # Actualizar parámetros de Suavizado PTZ en caliente
+                if "ptz" in c_cfg and "smoothing" in c_cfg["ptz"]:
+                    sm = c_cfg["ptz"]["smoothing"]
+                    node.ptz_manager.smoothing_enabled = bool(sm.get("enabled", node.ptz_manager.smoothing_enabled))
+                    node.ptz_manager.smoothing_alpha = float(sm.get("alpha", node.ptz_manager.smoothing_alpha))
 
 
 
@@ -603,3 +718,126 @@ async def websocket_telemetry(websocket: WebSocket):
     finally:
         if websocket in web_manager.active_websockets:
             web_manager.active_websockets.remove(websocket)
+
+
+# -------------------------------------------------------------------------
+# APIS DE AUTENTICACIÓN Y SEGURIDAD DEL PANEL
+# -------------------------------------------------------------------------
+
+@app.post("/api/login")
+async def login(req: LoginRequest):
+    """Verifica credenciales del administrador y establece la cookie de sesión."""
+    sec_cfg = web_manager.config_data.get("security", {})
+    valid_user = sec_cfg.get("admin_username", "admin")
+    valid_pass = sec_cfg.get("admin_password", "admin123")
+
+    if req.username == valid_user and req.password == valid_pass:
+        import hashlib
+        token = hashlib.sha256(f"{valid_user}:{valid_pass}".encode()).hexdigest()
+        response = JSONResponse(content={"success": True, "message": "Autenticación exitosa."})
+        response.set_cookie(key="session_auth", value=token, httponly=True, max_age=86400 * 7, samesite="lax")
+        return response
+    else:
+        raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos.")
+
+
+@app.post("/api/logout")
+async def logout():
+    """Elimina la cookie de sesión de autenticación."""
+    response = JSONResponse(content={"success": True, "message": "Sesión cerrada correctamente."})
+    response.delete_cookie(key="session_auth")
+    return response
+
+
+# -------------------------------------------------------------------------
+# APIS DE CLIPS DE EVIDENCIA EN ALERTAS (MP4 + METADATA)
+# -------------------------------------------------------------------------
+
+@app.get("/api/events")
+async def list_events():
+    """Lista todos los clips de evidencia grabados automáticamente."""
+    events_dir = Path("events")
+    if not events_dir.exists():
+        return {"events": []}
+
+    events = []
+    for meta_file in sorted(events_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            with open(meta_file, "r", encoding="utf-8") as jf:
+                meta = json.load(jf)
+                # Verificar si el archivo MP4 correspondiente existe
+                video_filename = meta.get("filename", "")
+                if (events_dir / video_filename).exists():
+                    events.append(meta)
+        except Exception as e:
+            logger.debug(f"Error leyendo evento {meta_file}: {e}")
+
+    return {"events": events}
+
+
+@app.get("/api/events/{filename}")
+async def get_event_file(filename: str):
+    """Descarga o transmite un clip MP4 de evidencia."""
+    # Prevenir Directory Traversal
+    clean_filename = Path(filename).name
+    file_path = Path("events") / clean_filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Archivo de evidencia no encontrado")
+
+    media_type = "video/mp4" if clean_filename.endswith(".mp4") else "application/json"
+    return FileResponse(path=str(file_path), media_type=media_type, filename=clean_filename)
+
+
+@app.delete("/api/events/{filename}")
+async def delete_event_file(filename: str):
+    """Elimina un clip MP4 y su archivo de metadata JSON asociado."""
+    clean_filename = Path(filename).name
+    base_name = clean_filename.rsplit(".", 1)[0]
+    events_dir = Path("events")
+
+    deleted = 0
+    for ext in [".mp4", ".json"]:
+        target = events_dir / f"{base_name}{ext}"
+        if target.exists():
+            try:
+                target.unlink()
+                deleted += 1
+            except Exception as e:
+                logger.error(f"Error eliminando {target}: {e}")
+
+    return {"success": deleted > 0, "deleted_files": deleted}
+
+
+# -------------------------------------------------------------------------
+# APIS DE GEOCERCAS / POLÍGONOS DE DETECCIÓN POR CÁMARA
+# -------------------------------------------------------------------------
+
+@app.post("/api/camera/{cam_id}/geofence")
+async def update_camera_geofence(cam_id: str, req: GeofenceUpdateRequest):
+    """Actualiza la geocerca para una cámara específica y persiste en config.yaml."""
+    node = web_manager.get_node(cam_id)
+    if not node:
+        raise HTTPException(status_code=404, detail="Cámara no encontrada")
+
+    geofence_dict = {
+        "enabled": req.enabled,
+        "mode": req.mode,
+        "points": req.points
+    }
+    node.geofence.update_config(geofence_dict)
+
+    # Actualizar y guardar en config.yaml
+    cams = web_manager.config_data.get("cameras", [])
+    for c in cams:
+        if str(c.get("id")) == cam_id:
+            c["geofence"] = geofence_dict
+            break
+
+    try:
+        with open(web_manager.config_path, "w", encoding="utf-8") as f:
+            yaml.dump(web_manager.config_data, f, allow_unicode=True, sort_keys=False)
+        return {"success": True, "message": "Geocerca actualizada y guardada con éxito."}
+    except Exception as e:
+        logger.error(f"Error guardando geocerca en YAML: {e}")
+        return {"success": True, "message": "Geocerca aplicada en memoria (error al guardar en YAML)."}
+

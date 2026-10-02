@@ -105,6 +105,27 @@ class PTZManager:
         self.cmd_interval = 0.12  # Máximo 8 comandos por segundo
         self.last_sent_pan = 0.0
         self.last_sent_tilt = 0.0
+        self.last_sent_zoom = 0.0
+
+        # -------------------------------------------------------------
+        # 1. AUTO-ZOOM DINÁMICO (ENCUADRE AUTOMÁTICO) POR CÁMARA
+        # -------------------------------------------------------------
+        az_cfg = ptz_config.get("auto_zoom", {})
+        self.auto_zoom_enabled = bool(az_cfg.get("enabled", False))
+        self.target_height_ratio_min = float(az_cfg.get("target_height_ratio_min", 0.18))
+        self.target_height_ratio_max = float(az_cfg.get("target_height_ratio_max", 0.50))
+        self.zoom_speed = float(az_cfg.get("zoom_speed", 0.35))
+        self.current_zoom_state = "IDLE"  # "IDLE", "IN", "OUT"
+
+        # -------------------------------------------------------------
+        # 2. SUAVIZADO DE MOVIMIENTO PTZ (CONTROL PROPORCIONAL AMORTIGUADO EMA)
+        # -------------------------------------------------------------
+        sm_cfg = ptz_config.get("smoothing", {})
+        self.smoothing_enabled = bool(sm_cfg.get("enabled", True))
+        self.smoothing_alpha = float(sm_cfg.get("alpha", 0.35))  # Factor de amortiguación (0.1 suave a 1.0 rígido)
+        self.smoothed_pan = 0.0
+        self.smoothed_tilt = 0.0
+        self.smoothed_zoom = 0.0
 
         self._setup_controller()
 
@@ -183,9 +204,11 @@ class PTZManager:
         """Indica si hay una cámara PTZ motorizada conectada."""
         return self.hardware_controller is not None and self.hardware_controller.is_available()
 
-    def update(self, primary_target: Optional[Dict[str, Any]] = None):
+    def update(self, primary_target: Optional[Dict[str, Any]] = None, frame_shape: Optional[Tuple[int, int]] = None):
         """
         Actualiza el lazo de control PTZ según las detecciones del frame actual.
+        :param primary_target: Objetivo prioritario o None.
+        :param frame_shape: Tupla (height, width) para auto-zoom dinámico.
         """
         now = time.time()
 
@@ -359,31 +382,66 @@ class PTZManager:
             # Error respecto al centro del encuadre (-1.0 a 1.0)
             norm_err_x, norm_err_y = active_target["norm_error"]
 
-            cmd_pan = 0.0
-            cmd_tilt = 0.0
+            raw_pan = 0.0
+            raw_tilt = 0.0
+            raw_zoom = 0.0
 
             # Aplicar zona muerta horizontal
             if abs(norm_err_x) > self.deadzone_x:
-                cmd_pan = norm_err_x * self.tracking_speed
+                raw_pan = norm_err_x * self.tracking_speed
 
             # Aplicar zona muerta vertical (invertido: en video Y crece hacia abajo)
             if abs(norm_err_y) > self.deadzone_y:
-                cmd_tilt = -norm_err_y * self.tracking_speed
+                raw_tilt = -norm_err_y * self.tracking_speed
 
-            # Caso A: Objetivo centrado dentro de la zona muerta
-            if abs(cmd_pan) < 0.05 and abs(cmd_tilt) < 0.05:
-                if self.last_sent_pan != 0.0 or self.last_sent_tilt != 0.0:
+            # Auto-Zoom Dinámico (Encuadre Automático)
+            if self.auto_zoom_enabled and frame_shape is not None and "height" in active_target:
+                fh = frame_shape[0]
+                if fh > 0:
+                    h_ratio = float(active_target["height"]) / float(fh)
+                    if h_ratio < self.target_height_ratio_min:
+                        raw_zoom = self.zoom_speed
+                        self.current_zoom_state = "IN"
+                    elif h_ratio > self.target_height_ratio_max:
+                        raw_zoom = -self.zoom_speed
+                        self.current_zoom_state = "OUT"
+                    else:
+                        raw_zoom = 0.0
+                        self.current_zoom_state = "IDLE"
+
+            # Suavizado Proporcional Amortiguado (EMA)
+            if self.smoothing_enabled:
+                alpha = max(0.05, min(1.0, self.smoothing_alpha))
+                self.smoothed_pan = (1.0 - alpha) * self.smoothed_pan + alpha * raw_pan
+                self.smoothed_tilt = (1.0 - alpha) * self.smoothed_tilt + alpha * raw_tilt
+                self.smoothed_zoom = (1.0 - alpha) * self.smoothed_zoom + alpha * raw_zoom
+                cmd_pan = self.smoothed_pan
+                cmd_tilt = self.smoothed_tilt
+                cmd_zoom = self.smoothed_zoom
+            else:
+                cmd_pan = raw_pan
+                cmd_tilt = raw_tilt
+                cmd_zoom = raw_zoom
+                self.smoothed_pan = raw_pan
+                self.smoothed_tilt = raw_tilt
+                self.smoothed_zoom = raw_zoom
+
+            # Caso A: Objetivo centrado dentro de la zona muerta sin zoom
+            if abs(cmd_pan) < 0.05 and abs(cmd_tilt) < 0.05 and abs(cmd_zoom) < 0.05:
+                if self.last_sent_pan != 0.0 or self.last_sent_tilt != 0.0 or self.last_sent_zoom != 0.0:
                     self.hardware_controller.stop()
                     self.last_sent_pan = 0.0
                     self.last_sent_tilt = 0.0
+                    self.last_sent_zoom = 0.0
                 return
 
-            # Caso B: Objetivo fuera del centro -> enviar movimiento si pasó el intervalo
-            if (now - self.last_cmd_time) >= self.cmd_interval or (self.last_sent_pan == 0.0 and self.last_sent_tilt == 0.0):
-                self.hardware_controller.continuous_move(cmd_pan, cmd_tilt)
+            # Caso B: Objetivo fuera del centro o requiriendo zoom -> enviar movimiento
+            if (now - self.last_cmd_time) >= self.cmd_interval or (self.last_sent_pan == 0.0 and self.last_sent_tilt == 0.0 and self.last_sent_zoom == 0.0):
+                self.hardware_controller.continuous_move(cmd_pan, cmd_tilt, cmd_zoom)
                 self.last_cmd_time = now
                 self.last_sent_pan = cmd_pan
                 self.last_sent_tilt = cmd_tilt
+                self.last_sent_zoom = cmd_zoom
             return
 
         # -------------------------------------------------------------
@@ -391,12 +449,19 @@ class PTZManager:
         # -------------------------------------------------------------
         time_since_target = now - self.last_target_time
 
+        # Restablecer valores de suavizado y zoom al reposo
+        self.smoothed_pan = 0.0
+        self.smoothed_tilt = 0.0
+        self.smoothed_zoom = 0.0
+        self.current_zoom_state = "IDLE"
+
         # Si el patrullaje de búsqueda está desactivado para esta cámara
         if not self.patrol_enabled:
-            if self.last_sent_pan != 0.0 or self.last_sent_tilt != 0.0:
+            if self.last_sent_pan != 0.0 or self.last_sent_tilt != 0.0 or self.last_sent_zoom != 0.0:
                 self.hardware_controller.stop()
                 self.last_sent_pan = 0.0
                 self.last_sent_tilt = 0.0
+                self.last_sent_zoom = 0.0
             self.patrol_substate = "IDLE"
             self.is_patrolling = False
             self.status = "IDLE (Patrullaje Desactivado)"
@@ -404,10 +469,11 @@ class PTZManager:
 
         # Si aún no vence el intervalo de inactividad
         if time_since_target < self.patrol_interval:
-            if self.last_sent_pan != 0.0 or self.last_sent_tilt != 0.0:
+            if self.last_sent_pan != 0.0 or self.last_sent_tilt != 0.0 or self.last_sent_zoom != 0.0:
                 self.hardware_controller.stop()
                 self.last_sent_pan = 0.0
                 self.last_sent_tilt = 0.0
+                self.last_sent_zoom = 0.0
             self.patrol_substate = "IDLE"
             self.is_patrolling = False
             self.status = f"IDLE (Patrulla en {int(self.patrol_interval - time_since_target)}s)"
@@ -753,7 +819,18 @@ class PTZManager:
             "patrol_direction": "Derecha" if self.patrol_direction > 0 else "Izquierda",
             "patrol_tilt": "Horizonte" if self.patrol_tilt_direction > 0 else "Calle",
             "manual_override_active": now < self.manual_override_until,
-            "manual_override_remaining": round(max(0.0, self.manual_override_until - now), 1)
+            "manual_override_remaining": round(max(0.0, self.manual_override_until - now), 1),
+            "auto_zoom": {
+                "enabled": self.auto_zoom_enabled,
+                "state": self.current_zoom_state,
+                "target_height_ratio_min": self.target_height_ratio_min,
+                "target_height_ratio_max": self.target_height_ratio_max,
+                "zoom_speed": self.zoom_speed
+            },
+            "smoothing": {
+                "enabled": self.smoothing_enabled,
+                "alpha": self.smoothing_alpha
+            }
         }
 
     def set_white_light(self, state: bool) -> bool:

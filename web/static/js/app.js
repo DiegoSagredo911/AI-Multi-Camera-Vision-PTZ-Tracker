@@ -23,22 +23,30 @@ document.addEventListener("DOMContentLoaded", () => {
 // ---------------------------------------------------------------------------
 function switchTab(tab) {
     const tabMonitor = document.getElementById("tabContentMonitor");
+    const tabEvents = document.getElementById("tabContentEvents");
     const tabConfig = document.getElementById("tabContentConfig");
     const btnMonitor = document.getElementById("tabBtnMonitor");
+    const btnEvents = document.getElementById("tabBtnEvents");
     const btnConfig = document.getElementById("tabBtnConfig");
+
+    tabMonitor.classList.add("hidden");
+    if (tabEvents) tabEvents.classList.add("hidden");
+    tabConfig.classList.add("hidden");
+
+    btnMonitor.className = "px-3.5 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 text-gray-300 hover:text-white hover:bg-dark-600/50";
+    if (btnEvents) btnEvents.className = "px-3.5 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 text-gray-300 hover:text-white hover:bg-dark-600/50";
+    btnConfig.className = "px-3.5 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 text-gray-300 hover:text-white hover:bg-dark-600/50";
 
     if (tab === "monitor") {
         tabMonitor.classList.remove("hidden");
-        tabConfig.classList.add("hidden");
-
         btnMonitor.className = "px-3.5 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 bg-blue-600 text-white shadow";
-        btnConfig.className = "px-3.5 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 text-gray-300 hover:text-white hover:bg-dark-600/50";
+    } else if (tab === "events") {
+        if (tabEvents) tabEvents.classList.remove("hidden");
+        if (btnEvents) btnEvents.className = "px-3.5 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 bg-blue-600 text-white shadow";
+        loadEventsGallery();
     } else {
-        tabMonitor.classList.add("hidden");
         tabConfig.classList.remove("hidden");
-
         btnConfig.className = "px-3.5 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 bg-blue-600 text-white shadow";
-        btnMonitor.className = "px-3.5 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 text-gray-300 hover:text-white hover:bg-dark-600/50";
         loadConfig(); // Recargar datos frescos
     }
 }
@@ -324,6 +332,12 @@ function updateDashboard(data) {
             if (cam.spotlight) {
                 if (spotBadge) {
                     if (cam.spotlight.active) {
+                        spotBadge.innerHTML = `<i data-lucide="zap" class="w-2.5 h-2.5"></i> FLASH ON`;
+                        spotBadge.className = "text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1 animate-pulse";
+                        spotBadge.classList.remove("hidden");
+                    } else if (cam.spotlight.dwelling && cam.spotlight.dwell_remaining > 0) {
+                        spotBadge.innerHTML = `<i data-lucide="timer" class="w-2.5 h-2.5"></i> FLASH (${cam.spotlight.dwell_remaining}s)`;
+                        spotBadge.className = "text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-200 border border-amber-500/30 flex items-center gap-1";
                         spotBadge.classList.remove("hidden");
                     } else {
                         spotBadge.classList.add("hidden");
@@ -342,9 +356,12 @@ function updateDashboard(data) {
 
 
     avgFps = (avgFps / data.cameras.length).toFixed(1);
-    document.getElementById("headerFps").innerText = `FPS: ${avgFps}`;
-    document.getElementById("headerDetections").innerText = `${totalDets} Objetivos`;
-    document.getElementById("activeDetectionsCount").innerText = totalDets;
+    const headerFpsEl = document.getElementById("headerFps");
+    if (headerFpsEl) headerFpsEl.innerText = `FPS: ${avgFps}`;
+    const headerDetectionsEl = document.getElementById("headerDetections");
+    if (headerDetectionsEl) headerDetectionsEl.innerText = `${totalDets} Objetivos`;
+    const activeDetectionsCountEl = document.getElementById("activeDetectionsCount");
+    if (activeDetectionsCountEl) activeDetectionsCountEl.innerText = totalDets;
 
     // Renderizar lista de detecciones en vivo
     renderDetectionsList(activeDetectionsList);
@@ -398,15 +415,25 @@ async function loadConfig() {
         document.getElementById("cfgConfidence").value = det.confidence || 0.30;
         document.getElementById("cfgConfLabel").innerText = det.confidence || 0.30;
 
-        const targetClasses = det.target_classes || [];
+        // Cargar clases de IA marcadas en los checkboxes
+        const targetClasses = (det.target_classes || ["person", "car", "motorcycle", "truck", "bus", "dog", "cat"]).map(c => String(c).toLowerCase());
         document.querySelectorAll(".cfg-class-checkbox").forEach(cb => {
-            cb.checked = targetClasses.includes(cb.value);
+            cb.checked = targetClasses.includes(cb.value.toLowerCase());
         });
 
         // Cargar estado de logs en consola
         if (currentConfig.logging) {
             document.getElementById("cfgQuietLogs").checked = currentConfig.logging.quiet ?? false;
         }
+
+        // Cargar configuración de seguridad
+        const sec = currentConfig.security || {};
+        const authCb = document.getElementById("cfgAuthEnabled");
+        if (authCb) authCb.checked = Boolean(sec.auth_enabled);
+        const userInp = document.getElementById("cfgAdminUsername");
+        if (userInp) userInp.value = sec.admin_username || "admin";
+        const passInp = document.getElementById("cfgAdminPassword");
+        if (passInp) passInp.value = sec.admin_password || "";
 
         renderCamerasList();
 
@@ -561,20 +588,62 @@ function openCameraModal(index = -1) {
             populatePresetNames();
         }
 
+        // Cargar orden de prioridad de seguimiento de objetivos
+        const rawPriority = cam.tracking_priority || (cam.ptz && cam.ptz.tracking_priority) || ["person", "car", "motorcycle", "dog"];
+        currentModalPriority = Array.isArray(rawPriority) ? [...rawPriority] : ["person", "car", "motorcycle", "dog"];
+        renderTrackingPriorityList(currentModalPriority);
+
         // Cargar configuración de Disuasión Activa / Flash Inteligente
         const spot = cam.spotlight || {};
         const spotEnabled = Boolean(spot.enabled);
         document.getElementById("modalCamSpotlightEnabled").checked = spotEnabled;
         toggleSpotlightFields(spotEnabled);
         document.getElementById("modalCamSpotlightCondition").value = (spot.night_only === false) ? "always" : "night_only";
-        let targetVal = "person";
-        if (Array.isArray(spot.trigger_classes)) {
-            if (spot.trigger_classes.includes("all")) targetVal = "all";
-            else if (spot.trigger_classes.includes("car") || spot.trigger_classes.includes("vehicles")) targetVal = "person_vehicle";
-            else targetVal = "person";
-        }
-        document.getElementById("modalCamSpotlightTargets").value = targetVal;
+        
+        // Cargar objetivos a disuadir modulares en los checkboxes
+        const rawSpotTargets = Array.isArray(spot.trigger_classes) ? spot.trigger_classes : ["person"];
+        const isAll = rawSpotTargets.includes("all");
+        document.querySelectorAll(".spotlight-target-cb").forEach(cb => {
+            if (isAll) {
+                cb.checked = true;
+            } else if (rawSpotTargets.includes("vehicles") && ["car", "motorcycle", "truck", "bus"].includes(cb.value)) {
+                cb.checked = true;
+            } else if (rawSpotTargets.includes("animals") && ["dog", "cat"].includes(cb.value)) {
+                cb.checked = true;
+            } else {
+                cb.checked = rawSpotTargets.includes(cb.value);
+            }
+        });
+
+        document.getElementById("modalCamSpotlightDelay").value = spot.trigger_delay_sec ?? 3.0;
+        document.getElementById("modalCamSpotlightDuration").value = spot.flash_duration_sec ?? 3.0;
+        document.getElementById("modalCamSpotlightOneShot").checked = (spot.one_shot_per_target !== false);
         document.getElementById("modalCamSpotlightCooldown").value = spot.cooldown_sec ?? 8;
+
+        // Auto-Zoom Dinámico & Suavizado PTZ
+        const az = (cam.ptz && cam.ptz.auto_zoom) ? cam.ptz.auto_zoom : {};
+        document.getElementById("modalCamAutoZoomEnabled").checked = Boolean(az.enabled);
+        document.getElementById("modalCamZoomMinRatio").value = az.target_height_ratio_min ?? 0.18;
+        document.getElementById("modalCamZoomMaxRatio").value = az.target_height_ratio_max ?? 0.50;
+        document.getElementById("modalCamZoomSpeed").value = az.zoom_speed ?? 0.35;
+
+        const sm = (cam.ptz && cam.ptz.smoothing) ? cam.ptz.smoothing : {};
+        document.getElementById("modalCamSmoothingEnabled").checked = (sm.enabled !== false);
+        document.getElementById("modalCamSmoothingAlpha").value = sm.alpha ?? 0.35;
+        document.getElementById("modalCamSmoothingAlphaVal").innerText = (sm.alpha ?? 0.35).toFixed(2);
+
+        // Geocercas y Zonas de Interés
+        const geo = cam.geofence || {};
+        document.getElementById("modalCamGeofenceEnabled").checked = Boolean(geo.enabled);
+        document.getElementById("modalCamGeofenceMode").value = geo.mode || "inclusion";
+        currentModalGeofencePoints = Array.isArray(geo.points) ? [...geo.points] : [];
+        updateGeofencePointsCounter();
+
+        // Grabación de Evidencia en Alertas (MP4)
+        const rec = cam.event_recording || {};
+        document.getElementById("modalCamRecEnabled").checked = Boolean(rec.enabled);
+        document.getElementById("modalCamRecPreSec").value = rec.pre_alarm_sec ?? 3.0;
+        document.getElementById("modalCamRecPostSec").value = rec.post_alarm_sec ?? 5.0;
 
     } else {
         detectedCameraPresets = [];
@@ -611,12 +680,41 @@ function openCameraModal(index = -1) {
         document.getElementById("modalCamInitialHoming").checked = true;
         togglePtzFields(false);
 
+        // Prioridad por defecto para cámara nueva
+        currentModalPriority = ["person", "car", "motorcycle", "dog"];
+        renderTrackingPriorityList(currentModalPriority);
+
         // Reset campos de Spotlight para cámara nueva
         document.getElementById("modalCamSpotlightEnabled").checked = false;
         toggleSpotlightFields(false);
         document.getElementById("modalCamSpotlightCondition").value = "night_only";
-        document.getElementById("modalCamSpotlightTargets").value = "person";
+        document.querySelectorAll(".spotlight-target-cb").forEach(cb => {
+            cb.checked = (cb.value === "person");
+        });
+        document.getElementById("modalCamSpotlightDelay").value = 3.0;
+        document.getElementById("modalCamSpotlightDuration").value = 3.0;
+        document.getElementById("modalCamSpotlightOneShot").checked = true;
         document.getElementById("modalCamSpotlightCooldown").value = 8;
+
+        // Reset Auto-Zoom & Suavizado
+        document.getElementById("modalCamAutoZoomEnabled").checked = false;
+        document.getElementById("modalCamZoomMinRatio").value = 0.18;
+        document.getElementById("modalCamZoomMaxRatio").value = 0.50;
+        document.getElementById("modalCamZoomSpeed").value = 0.35;
+        document.getElementById("modalCamSmoothingEnabled").checked = true;
+        document.getElementById("modalCamSmoothingAlpha").value = 0.35;
+        document.getElementById("modalCamSmoothingAlphaVal").innerText = "0.35";
+
+        // Reset Geocerca
+        document.getElementById("modalCamGeofenceEnabled").checked = false;
+        document.getElementById("modalCamGeofenceMode").value = "inclusion";
+        currentModalGeofencePoints = [];
+        updateGeofencePointsCounter();
+
+        // Reset Grabación
+        document.getElementById("modalCamRecEnabled").checked = false;
+        document.getElementById("modalCamRecPreSec").value = 3.0;
+        document.getElementById("modalCamRecPostSec").value = 5.0;
     }
 
     modal.classList.remove("hidden");
@@ -912,12 +1010,107 @@ function togglePtzFields(enabled) {
     }
 }
 
+// -------------------------------------------------------------------------
+// GESTOR DE PRIORIDAD DE SEGUIMIENTO (PTZ)
+// -------------------------------------------------------------------------
+
+const AVAILABLE_TRACKING_CLASSES = [
+    { id: "person", label: "Personas" },
+    { id: "car", label: "Autos / Vehículos" },
+    { id: "motorcycle", label: "Motos" },
+    { id: "truck", label: "Camiones" },
+    { id: "bus", label: "Colectivos / Buses" },
+    { id: "dog", label: "Perros" },
+    { id: "cat", label: "Gatos" }
+];
+let currentModalPriority = [];
+
+function renderTrackingPriorityList(priorityList) {
+    const container = document.getElementById("modalTrackingPriorityList");
+    if (!container) return;
+
+    const activeIds = (priorityList || []).map(c => String(c).toLowerCase());
+
+    // Crear lista ordenada completa: primero las clases activas en orden de prioridad, luego las inactivas
+    const ordered = [];
+    activeIds.forEach(id => {
+        const item = AVAILABLE_TRACKING_CLASSES.find(c => c.id === id) || { id, label: id };
+        ordered.push({ ...item, active: true });
+    });
+    AVAILABLE_TRACKING_CLASSES.forEach(item => {
+        if (!activeIds.includes(item.id)) {
+            ordered.push({ ...item, active: false });
+        }
+    });
+
+    container.innerHTML = "";
+    ordered.forEach((cls) => {
+        const row = document.createElement("div");
+        row.className = `flex items-center justify-between p-1.5 rounded border text-xs ${cls.active ? 'bg-dark-800 border-dark-600' : 'bg-dark-900/40 border-dark-800 opacity-60'}`;
+        const rank = activeIds.indexOf(cls.id);
+
+        row.innerHTML = `
+            <div class="flex items-center gap-2">
+                <input type="checkbox" ${cls.active ? 'checked' : ''} onchange="togglePriorityClass('${cls.id}', this.checked)" class="accent-emerald-500 rounded cursor-pointer">
+                <span class="font-bold text-[10px] w-5 text-center ${cls.active ? 'text-emerald-400 font-mono' : 'text-gray-500'}">${cls.active ? (rank + 1) + 'º' : '-'}</span>
+                <span class="text-gray-200 font-medium">${cls.label}</span>
+                <span class="text-[10px] text-gray-500 font-mono">(${cls.id})</span>
+            </div>
+            <div class="flex items-center gap-1">
+                <button type="button" onclick="movePriorityClass('${cls.id}', -1)" ${(!cls.active || rank === 0) ? 'disabled' : ''} class="px-2 py-0.5 rounded bg-dark-700 hover:bg-dark-600 disabled:opacity-20 disabled:cursor-not-allowed text-gray-200 text-[10px] font-bold" title="Subir prioridad">▲</button>
+                <button type="button" onclick="movePriorityClass('${cls.id}', 1)" ${(!cls.active || rank === activeIds.length - 1) ? 'disabled' : ''} class="px-2 py-0.5 rounded bg-dark-700 hover:bg-dark-600 disabled:opacity-20 disabled:cursor-not-allowed text-gray-200 text-[10px] font-bold" title="Bajar prioridad">▼</button>
+            </div>
+        `;
+        container.appendChild(row);
+    });
+
+    if (window.lucide) lucide.createIcons();
+}
+
+function togglePriorityClass(classId, isChecked) {
+    if (isChecked) {
+        if (!currentModalPriority.includes(classId)) {
+            currentModalPriority.push(classId);
+        }
+    } else {
+        currentModalPriority = currentModalPriority.filter(c => c !== classId);
+    }
+    renderTrackingPriorityList(currentModalPriority);
+}
+
+function movePriorityClass(classId, direction) {
+    const idx = currentModalPriority.indexOf(classId);
+    if (idx === -1) return;
+    const newIdx = idx + direction;
+    if (newIdx < 0 || newIdx >= currentModalPriority.length) return;
+
+    const temp = currentModalPriority[idx];
+    currentModalPriority[idx] = currentModalPriority[newIdx];
+    currentModalPriority[newIdx] = temp;
+
+    renderTrackingPriorityList(currentModalPriority);
+}
+
 function toggleSpotlightFields(enabled) {
     const fields = document.getElementById("modalSpotlightFields");
     if (fields) {
         if (enabled) fields.classList.remove("hidden");
         else fields.classList.add("hidden");
     }
+}
+
+function selectSpotlightTargetsPreset(preset) {
+    document.querySelectorAll(".spotlight-target-cb").forEach(cb => {
+        if (preset === "all") {
+            cb.checked = true;
+        } else if (preset === "none") {
+            cb.checked = false;
+        } else if (preset === "person") {
+            cb.checked = (cb.value === "person");
+        } else if (preset === "vehicles") {
+            cb.checked = ["person", "car", "motorcycle", "truck", "bus"].includes(cb.value);
+        }
+    });
 }
 
 async function testModalSpotlight() {
@@ -1004,18 +1197,20 @@ async function saveCameraModal() {
 
     const patrolType = document.getElementById("modalCamPatrolType").value;
 
-    // Disuasión Activa / Flash Óptico
+    // Disuasión Activa / Flash Óptico Modular
     const spotEnabled = document.getElementById("modalCamSpotlightEnabled").checked;
     const spotCond = document.getElementById("modalCamSpotlightCondition").value;
-    const spotTargets = document.getElementById("modalCamSpotlightTargets").value;
+    const spotDelay = parseFloat(document.getElementById("modalCamSpotlightDelay").value);
+    const spotDuration = parseFloat(document.getElementById("modalCamSpotlightDuration").value);
+    const spotOneShot = document.getElementById("modalCamSpotlightOneShot").checked;
     const spotCooldown = parseFloat(document.getElementById("modalCamSpotlightCooldown").value) || 8.0;
 
-    let targetClasses = ["person"];
-    if (spotTargets === "person_vehicle") {
-        targetClasses = ["person", "car", "motorcycle", "bus", "truck"];
-    } else if (spotTargets === "all") {
-        targetClasses = ["all"];
-    }
+    // Obtener las clases marcadas (modular: varios, algunos o ninguno)
+    const selectedTargetClasses = Array.from(document.querySelectorAll(".spotlight-target-cb:checked")).map(cb => cb.value);
+
+    const finalPriority = (currentModalPriority && currentModalPriority.length > 0)
+        ? [...currentModalPriority]
+        : ["person", "car", "motorcycle", "dog"];
 
     const newCamData = {
         id: camId,
@@ -1029,10 +1224,14 @@ async function saveCameraModal() {
         subtype: subtype,
         frame_skip: frameSkip,
         reconnect_interval_sec: 5,
+        tracking_priority: finalPriority,
         spotlight: {
             enabled: spotEnabled,
             night_only: (spotCond === "night_only"),
-            trigger_classes: targetClasses,
+            trigger_classes: selectedTargetClasses,
+            trigger_delay_sec: isNaN(spotDelay) ? 3.0 : spotDelay,
+            flash_duration_sec: isNaN(spotDuration) ? 3.0 : spotDuration,
+            one_shot_per_target: spotOneShot,
             cooldown_sec: spotCooldown
         },
         ptz: hasPtz ? {
@@ -1056,10 +1255,31 @@ async function saveCameraModal() {
             patrol_enabled: document.getElementById("modalCamPatrolEnabled").checked,
             positioning_mode: document.getElementById("modalCamPosMode").value,
             home_preset: document.getElementById("modalCamHomePreset").value.trim() || "1",
-            initial_homing: document.getElementById("modalCamInitialHoming").checked
+            initial_homing: document.getElementById("modalCamInitialHoming").checked,
+            tracking_priority: finalPriority,
+            auto_zoom: {
+                enabled: document.getElementById("modalCamAutoZoomEnabled").checked,
+                target_height_ratio_min: parseFloat(document.getElementById("modalCamZoomMinRatio").value) || 0.18,
+                target_height_ratio_max: parseFloat(document.getElementById("modalCamZoomMaxRatio").value) || 0.50,
+                zoom_speed: parseFloat(document.getElementById("modalCamZoomSpeed").value) || 0.35
+            },
+            smoothing: {
+                enabled: document.getElementById("modalCamSmoothingEnabled").checked,
+                alpha: parseFloat(document.getElementById("modalCamSmoothingAlpha").value) || 0.35
+            }
         } : {
             enabled: false,
             digital_ptz: false
+        },
+        geofence: {
+            enabled: document.getElementById("modalCamGeofenceEnabled").checked,
+            mode: document.getElementById("modalCamGeofenceMode").value,
+            points: currentModalGeofencePoints || []
+        },
+        event_recording: {
+            enabled: document.getElementById("modalCamRecEnabled").checked,
+            pre_alarm_sec: parseFloat(document.getElementById("modalCamRecPreSec").value) || 3.0,
+            post_alarm_sec: parseFloat(document.getElementById("modalCamRecPostSec").value) || 5.0
         }
     };
 
@@ -1096,10 +1316,38 @@ async function saveConfig() {
 
     try {
         // 1. Detección
-        const selectedClasses = Array.from(document.querySelectorAll(".cfg-class-checkbox:checked")).map(cb => cb.value);
         currentConfig.detection.model_name = document.getElementById("cfgModelName").value;
         currentConfig.detection.confidence = parseFloat(document.getElementById("cfgConfidence").value);
-        currentConfig.detection.target_classes = selectedClasses;
+        const classCheckboxes = document.querySelectorAll(".cfg-class-checkbox");
+        let activeClasses = [];
+        if (classCheckboxes.length > 0) {
+            activeClasses = Array.from(document.querySelectorAll(".cfg-class-checkbox:checked")).map(cb => cb.value);
+        } else if (Array.isArray(currentConfig.detection.target_classes)) {
+            activeClasses = [...currentConfig.detection.target_classes];
+        }
+
+        // Incorporar siempre cualquier clase activa en las cámaras configuradas
+        (currentConfig.cameras || []).forEach(c => {
+            const pri = c.tracking_priority || (c.ptz && c.ptz.tracking_priority);
+            if (Array.isArray(pri)) {
+                pri.forEach(cls => {
+                    if (cls && !activeClasses.includes(cls)) activeClasses.push(cls);
+                });
+            }
+            const spot = c.spotlight && c.spotlight.trigger_classes;
+            if (Array.isArray(spot)) {
+                spot.forEach(cls => {
+                    if (cls && !["all", "vehicles", "animals"].includes(cls) && !activeClasses.includes(cls)) {
+                        activeClasses.push(cls);
+                    }
+                });
+            }
+        });
+
+        if (activeClasses.length === 0) {
+            activeClasses = ["person", "car", "motorcycle", "truck", "bus", "dog", "cat"];
+        }
+        currentConfig.detection.target_classes = activeClasses;
 
         // 2. Configuración de Logs en Consola
         if (!currentConfig.logging) {
@@ -1108,7 +1356,18 @@ async function saveConfig() {
         currentConfig.logging.quiet = document.getElementById("cfgQuietLogs").checked;
         currentConfig.logging.level = currentConfig.logging.quiet ? "ERROR" : "INFO";
 
-        // 3. Enviar a servidor
+        // 3. Seguridad del Panel Web
+        if (!currentConfig.security) {
+            currentConfig.security = {};
+        }
+        const authCb = document.getElementById("cfgAuthEnabled");
+        if (authCb) currentConfig.security.auth_enabled = authCb.checked;
+        const userInp = document.getElementById("cfgAdminUsername");
+        if (userInp) currentConfig.security.admin_username = userInp.value.trim() || "admin";
+        const passInp = document.getElementById("cfgAdminPassword");
+        if (passInp && passInp.value) currentConfig.security.admin_password = passInp.value;
+
+        // 4. Enviar a servidor
         const res = await fetch("/api/config", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1155,4 +1414,273 @@ function showToast(message, type = "info") {
         toast.classList.add("opacity-0", "translate-y-2");
         setTimeout(() => toast.remove(), 300);
     }, 3500);
+}
+
+// ---------------------------------------------------------------------------
+// 8. EDITOR INTERACTIVO DE GEOCERCAS (CANVAS NORMALIZADO)
+// ---------------------------------------------------------------------------
+let currentModalGeofencePoints = [];
+
+function updateGeofencePointsCounter() {
+    const counter = document.getElementById("modalCamGeofencePointsInfo");
+    if (counter) {
+        counter.innerText = `Puntos definidos: ${currentModalGeofencePoints.length}`;
+    }
+}
+
+function openGeofenceDrawingModal() {
+    const camId = document.getElementById("modalCamId").value.trim();
+    if (!camId) {
+        showToast("Ingresa primero el ID de la cámara.", "warning");
+        return;
+    }
+
+    const modal = document.getElementById("geofenceModal");
+    const bgImg = document.getElementById("geofenceStreamBg");
+    const canvas = document.getElementById("geofenceCanvas");
+
+    // Asignar stream en vivo al fondo
+    bgImg.src = `/api/stream/${camId}`;
+
+    bgImg.onload = () => {
+        canvas.width = bgImg.clientWidth || bgImg.naturalWidth;
+        canvas.height = bgImg.clientHeight || bgImg.naturalHeight;
+        redrawGeofenceCanvas();
+    };
+
+    modal.classList.remove("hidden");
+    if (window.lucide) lucide.createIcons();
+
+    // Configurar listener de clics sobre el canvas
+    canvas.onclick = (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const clickX = e.clientX - rect.left;
+        const clickY = e.clientY - rect.top;
+
+        // Normalizar a rango [0.0, 1.0]
+        const normX = Math.max(0, Math.min(1, clickX / rect.width));
+        const normY = Math.max(0, Math.min(1, clickY / rect.height));
+
+        currentModalGeofencePoints.push({ x: parseFloat(normX.toFixed(4)), y: parseFloat(normY.toFixed(4)) });
+        redrawGeofenceCanvas();
+    };
+}
+
+function redrawGeofenceCanvas() {
+    const canvas = document.getElementById("geofenceCanvas");
+    const bgImg = document.getElementById("geofenceStreamBg");
+    if (!canvas || !bgImg) return;
+
+    const w = canvas.width;
+    const h = canvas.height;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, w, h);
+
+    const counter = document.getElementById("geofencePointsCounter");
+    if (counter) counter.innerText = `${currentModalGeofencePoints.length} vértices trazados`;
+
+    if (currentModalGeofencePoints.length === 0) return;
+
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "#f97316"; // Naranja
+    ctx.fillStyle = "rgba(249, 115, 22, 0.25)";
+
+    ctx.beginPath();
+    currentModalGeofencePoints.forEach((pt, i) => {
+        const px = pt.x * w;
+        const py = pt.y * h;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+    });
+
+    if (currentModalGeofencePoints.length >= 3) {
+        ctx.closePath();
+        ctx.fill();
+    }
+    ctx.stroke();
+
+    // Dibujar círculos en cada vértice
+    currentModalGeofencePoints.forEach((pt, i) => {
+        const px = pt.x * w;
+        const py = pt.y * h;
+        ctx.beginPath();
+        ctx.arc(px, py, i === 0 ? 6 : 4, 0, 2 * Math.PI);
+        ctx.fillStyle = (i === 0) ? "#ef4444" : "#f97316";
+        ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+    });
+}
+
+function clearGeofencePoints() {
+    currentModalGeofencePoints = [];
+    redrawGeofenceCanvas();
+    updateGeofencePointsCounter();
+}
+
+function closeGeofenceModal() {
+    const modal = document.getElementById("geofenceModal");
+    const bgImg = document.getElementById("geofenceStreamBg");
+    if (bgImg) bgImg.src = ""; // Detener stream para liberar RAM
+    if (modal) modal.classList.add("hidden");
+}
+
+function applyGeofencePoints() {
+    if (currentModalGeofencePoints.length > 0 && currentModalGeofencePoints.length < 3) {
+        showToast("Un polígono debe tener al menos 3 vértices.", "warning");
+        return;
+    }
+    updateGeofencePointsCounter();
+    closeGeofenceModal();
+    showToast(`Polígono definido con ${currentModalGeofencePoints.length} vértices.`, "success");
+}
+
+// ---------------------------------------------------------------------------
+// 9. GALERÍA Y REPRODUCTOR DE CLIPS DE EVIDENCIA (MP4)
+// ---------------------------------------------------------------------------
+async function loadEventsGallery() {
+    const container = document.getElementById("eventsGalleryContainer");
+    if (!container) return;
+
+    try {
+        const res = await fetch("/api/events");
+        const data = await res.json();
+        const events = data.events || [];
+
+        if (events.length === 0) {
+            container.innerHTML = `<p class="col-span-full text-gray-500 italic text-center py-10">No hay clips de evidencia grabados aún. Los clips se graban al activarse una alerta o luz de advertencia (flash).</p>`;
+            return;
+        }
+
+        container.innerHTML = events.map(ev => {
+            const dateStr = ev.datetime || new Date(ev.timestamp * 1000).toLocaleString();
+            const duration = ev.duration_sec ? `${ev.duration_sec}s` : '--';
+            const targetCls = (ev.target && ev.target.class_name) ? ev.target.class_name.toUpperCase() : 'ALERTA';
+
+            return `
+                <div class="bg-dark-900/80 border border-dark-700/80 rounded-xl p-4 flex flex-col justify-between shadow-lg hover:border-dark-600 transition">
+                    <div>
+                        <div class="flex items-start justify-between mb-2">
+                            <span class="px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30 text-[10px] font-bold">
+                                ${ev.cam_name || ev.cam_id}
+                            </span>
+                            <span class="text-[10px] text-gray-500 font-mono">${duration}</span>
+                        </div>
+                        <h4 class="font-bold text-sm text-gray-100 flex items-center gap-1.5 mb-1">
+                            <i data-lucide="alert-triangle" class="w-4 h-4 text-amber-400"></i> ${ev.reason || 'Alerta'} (${targetCls})
+                        </h4>
+                        <p class="text-[11px] text-gray-400 font-mono">${dateStr}</p>
+                    </div>
+
+                    <div class="mt-4 pt-3 border-t border-dark-800 flex items-center justify-between">
+                        <button onclick="playEventClip('${ev.filename}', '${ev.cam_name || ev.cam_id}', '${dateStr}', '${duration}')" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition">
+                            <i data-lucide="play" class="w-3.5 h-3.5"></i> Reproducir
+                        </button>
+                        <div class="flex items-center gap-1.5">
+                            <a href="/api/events/${ev.filename}" download class="p-1.5 bg-dark-700 hover:bg-dark-600 text-gray-300 rounded-lg text-xs transition" title="Descargar MP4">
+                                <i data-lucide="download" class="w-4 h-4"></i>
+                            </a>
+                            <button onclick="deleteEventClip('${ev.filename}')" class="p-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30 rounded-lg text-xs transition" title="Eliminar Clip">
+                                <i data-lucide="trash-2" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join("");
+
+        if (window.lucide) lucide.createIcons();
+
+    } catch (err) {
+        console.error("Error al cargar galería de eventos:", err);
+        container.innerHTML = `<p class="col-span-full text-red-400 text-center py-6 text-xs">Error cargando galería de eventos.</p>`;
+    }
+}
+
+function playEventClip(filename, camName, dateStr, duration) {
+    const modal = document.getElementById("eventPlayerModal");
+    const video = document.getElementById("eventPlayerVideo");
+    const title = document.getElementById("eventPlayerTitle");
+    const sub = document.getElementById("eventPlayerSubtitle");
+    const dlBtn = document.getElementById("eventPlayerDownloadBtn");
+    const details = document.getElementById("eventPlayerDetails");
+
+    title.innerHTML = `<i data-lucide="film" class="w-4 h-4 text-blue-400"></i> ${camName} - Clip de Evidencia`;
+    sub.innerText = `${filename} (${dateStr})`;
+    details.innerText = `Duración estimada: ${duration}`;
+    dlBtn.href = `/api/events/${filename}`;
+
+    video.src = `/api/events/${filename}`;
+    modal.classList.remove("hidden");
+    if (window.lucide) lucide.createIcons();
+}
+
+function closeEventPlayerModal() {
+    const modal = document.getElementById("eventPlayerModal");
+    const video = document.getElementById("eventPlayerVideo");
+    if (video) {
+        video.pause();
+        video.src = "";
+    }
+    if (modal) modal.classList.add("hidden");
+}
+
+async function deleteEventClip(filename) {
+    if (!confirm(`¿Eliminar clip de evidencia ${filename}?`)) return;
+    try {
+        const res = await fetch(`/api/events/${filename}`, { method: "DELETE" });
+        if (res.ok) {
+            showToast("Clip de evidencia eliminado.", "info");
+            loadEventsGallery();
+        } else {
+            showToast("No se pudo eliminar el clip.", "error");
+        }
+    } catch (err) {
+        showToast("Error de conexión al eliminar clip.", "error");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 10. GESTIÓN DE AUTENTICACIÓN Y SEGURIDAD DEL PANEL
+// ---------------------------------------------------------------------------
+function handleAuthButtonClick() {
+    openAuthModal();
+}
+
+function openAuthModal() {
+    const modal = document.getElementById("authModal");
+    if (modal) {
+        modal.classList.remove("hidden");
+        document.getElementById("loginUsername").focus();
+    }
+}
+
+function closeAuthModal() {
+    const modal = document.getElementById("authModal");
+    if (modal) modal.classList.add("hidden");
+}
+
+async function submitLogin(e) {
+    e.preventDefault();
+    const user = document.getElementById("loginUsername").value.trim();
+    const pass = document.getElementById("loginPassword").value;
+
+    try {
+        const res = await fetch("/api/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username: user, password: pass })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            showToast("¡Autenticación exitosa!", "success");
+            closeAuthModal();
+            setTimeout(() => window.location.reload(), 600);
+        } else {
+            showToast(data.detail || "Credenciales incorrectas.", "error");
+        }
+    } catch (err) {
+        showToast("Error de conexión con el servidor de autenticación.", "error");
+    }
 }

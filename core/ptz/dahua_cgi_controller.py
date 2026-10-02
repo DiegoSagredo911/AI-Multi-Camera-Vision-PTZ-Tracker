@@ -103,6 +103,12 @@ class DahuaCgiPTZController(BasePTZController):
             code = "Up"
         elif tilt_velocity < -0.15:
             code = "Down"
+        elif zoom_velocity > 0.15:
+            code = "ZoomTele"
+            speed = max(1, min(8, int(abs(zoom_velocity) * 8)))
+        elif zoom_velocity < -0.15:
+            code = "ZoomWide"
+            speed = max(1, min(8, int(abs(zoom_velocity) * 8)))
 
         if code is None:
             return self.stop()
